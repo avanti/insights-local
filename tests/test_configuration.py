@@ -5,10 +5,12 @@ import io
 import json
 import os
 from pathlib import Path
+import plistlib
 import shutil
 import subprocess
 import tempfile
 import unittest
+from urllib.parse import parse_qs, urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location("bootstrap_local", ROOT / "scripts/bootstrap_local.py")
@@ -138,6 +140,53 @@ class ConfigurationTests(unittest.TestCase):
             self.assertNotIn(secret, output.getvalue())
 
 
+class CodexShortcutTests(unittest.TestCase):
+    def test_host_paths_round_trip_for_all_systems(self):
+        cases = (
+            ("macos", "/Users/Pessoa/Insights com espaços & #", "/sources/frontend"),
+            ("linux", "/home/pessoa/Insights com espaços & #", "/sources/frontend"),
+            ("windows", r"C:\Users\Pessoa\Insights com espaços & #", r"\sources\frontend"),
+        )
+        for platform, host_root, suffix in cases:
+            with self.subTest(platform=platform):
+                files = bootstrap.codex_shortcuts(host_root, platform)
+                projects = json.loads(files["codex-projects.json"])
+                expected = host_root + suffix
+                self.assertEqual(projects["frontend"]["path"], expected)
+                url = urlsplit(projects["frontend"]["url"])
+                self.assertEqual((url.scheme, url.netloc), ("codex", "new"))
+                self.assertEqual(parse_qs(url.query), {"path": [expected]})
+                self.assertEqual(url.fragment, "")
+                self.assertIn("cadastro permanente", files["codex-projects.html"])
+                if platform == "macos":
+                    self.assertEqual(plistlib.loads(files["codex/frontend.webloc"].encode())["URL"], projects["frontend"]["url"])
+                if platform == "windows":
+                    self.assertIn("URL=" + projects["frontend"]["url"], files["codex/frontend.url"])
+
+    def test_html_escapes_special_characters_in_host_folder(self):
+        files = bootstrap.codex_shortcuts('/Users/person/<script>alert("test")</script>', "macos")
+        self.assertNotIn("<script>", files["codex-projects.html"])
+        self.assertIn("&lt;script&gt;", files["codex-projects.html"])
+
+    def test_rejects_relative_and_multiline_host_paths(self):
+        for platform, path in (("macos", "relative"), ("windows", r"C:relative"),
+                               ("linux", "/tmp/invalid\nfolder"), ("linux", "/tmp/invalid\x00")):
+            with self.assertRaises(ValueError):
+                bootstrap.codex_shortcuts(path, platform)
+
+    def test_configure_uses_host_path_instead_of_container_mount(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder) / "container-mount"
+            root.mkdir()
+            shutil.copy(ROOT / "sources.lock", root)
+            shutil.copytree(ROOT / "templates", root / "templates")
+            with contextlib.redirect_stdout(io.StringIO()):
+                bootstrap.configure(root, None, None, None, "/Users/person/insights-local", "macos")
+            projects = json.loads((root / ".local/codex-projects.json").read_text())
+            self.assertEqual(projects["backend"]["path"], "/Users/person/insights-local/sources/backend")
+            self.assertNotIn(str(root), projects["backend"]["url"])
+
+
 class DemoGuardTests(unittest.TestCase):
     def test_demo_allows_login_refresh_logout_and_reads(self):
         for path in bootstrap.AUTH_WRITES:
@@ -172,6 +221,36 @@ class DemoGuardTests(unittest.TestCase):
 
 
 class LauncherTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "Windows launcher is tested in native PowerShell")
+    @unittest.skipUnless(shutil.which("bash"), "Bash is not available")
+    def test_codex_opens_selected_host_link_without_docker(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for name, content in bootstrap.codex_shortcuts(str(root), "linux").items():
+                bootstrap.private_write(root / ".local" / name, content)
+            for name in ("frontend", "backend"):
+                (root / "sources" / name / ".git").mkdir(parents=True)
+            binary = root / "bin"
+            binary.mkdir()
+            opener = binary / "xdg-open"
+            opener.write_text('#!/bin/sh\nprintf "%s\\n" "$@" >> "$INSIGHTS_LAUNCH_LOG"\n')
+            opener.chmod(0o755)
+            log = root / "opened.txt"
+            env = {**os.environ, "PATH": str(binary) + os.pathsep + os.environ["PATH"], "INSIGHTS_LAUNCH_LOG": str(log)}
+            # Mock the macOS opener too: CI runs this test on Linux and macOS.
+            shutil.copy(opener, binary / "open")
+            result = subprocess.run(["bash", str(ROOT / "scripts/local.sh"), "codex", "--root", str(root),
+                                     "--project", "backend"], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(log.read_text(), (root / ".local/codex/backend.link").read_text())
+            self.assertNotIn("cadastro concluido", result.stdout)
+            log.unlink()
+            (root / ".local/codex/backend.link").write_text("https://unexpected.invalid\n")
+            result = subprocess.run(["bash", str(ROOT / "scripts/local.sh"), "codex", "--root", str(root)],
+                                    env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2)
+            self.assertFalse(log.exists(), "Validate all shortcuts before opening either project")
+
     @unittest.skipIf(os.name == "nt", "Windows Bash is validated by its native CI shell")
     @unittest.skipUnless(shutil.which("bash"), "Bash is not available")
     def test_help_needs_no_installed_dependencies(self):

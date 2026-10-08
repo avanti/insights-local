@@ -21,3 +21,21 @@ UAC/WSL e reinicializacao no Windows; instalacao Apple/Docker no macOS;
 permissoes sudo e instalacao de pacotes nas distribuicoes Linux suportadas.
 ARM/Apple Silicon nao foi testado em hardware nesta validacao.
 Analises reais em connected dependem das credenciais e das integracoes de cada pessoa.
+
+## Atualizacao v0.1.1: atalhos para o Codex
+
+- 23 testes Python: configuracao e protecoes existentes, caminhos reais do host
+  para macOS/Linux/Windows, espacos/acentos/caracteres especiais, escape HTML,
+  leitura dos atalhos macOS/Windows e abertura seletiva com um launcher simulado.
+- Configuracao executada no container Python 3.11, com caminhos do host fornecidos
+  explicitamente: os links apontam para sources/frontend e sources/backend no
+  computador, sem usar o ponto de montagem /bootstrap do container.
+- Bash: sintaxe com Bash 3.2 e ShellCheck 0.10.0 aprovados.
+- PowerShell 7.4: parser e contratos existentes aprovados; abertura seletiva dos
+  links e rejeicao de links invalidos verificadas com Start-Process simulado.
+
+A CI executa os contratos nos tres sistemas. Estes testes nao abrem o aplicativo
+Codex nem confirmam o cadastro permanente na barra lateral. A abertura pelo link
+e o cadastro dos projetos devem ser conferidos na instalacao da pessoa.
+Esta atualizacao nao muda os SHAs dos aplicativos nem o funcionamento da stack;
+o teste completo da stack descrito acima foi realizado na v0.1.0.

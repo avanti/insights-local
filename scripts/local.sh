@@ -16,33 +16,37 @@ INSIGHTS_PORT=""
 INSIGHTS_API_PORT=""
 INSIGHTS_NO_BROWSER=false
 INSIGHTS_NONINTERACTIVE=false
+INSIGHTS_PROJECT="all"
 INSIGHTS_DOCKER=(docker)
 
 usage() {
   cat <<'USAGE'
 Avanti Insights local
-Uso: bash scripts/local.sh <setup|start|stop|status|doctor|help> [opcoes]
+Uso: bash scripts/local.sh <setup|start|stop|status|doctor|codex|help> [opcoes]
   --root DIRETORIO       Pasta do instalador (util para o script avulso).
   --mode demo|connected  Modo inicial demo; execucoes seguintes preservam o modo.
   --port NUMERO          Porta da interface (padrao 3000).
   --api-port NUMERO      Porta da API (padrao 8000).
   --no-browser          Nao abrir o navegador.
   --non-interactive     Nao iniciar login interativo no GitHub.
+  --project frontend|backend|all  Pasta a abrir com codex (padrao all).
 setup instala dependencias ausentes, clona, configura e inicia.
-start/stop/status/doctor nao instalam software.
+start/stop/status/doctor/codex nao instalam software.
+codex abre conversas nas pastas dos aplicativos; confira o cadastro de projetos no app.
 USAGE
 }
 
 fail() { printf '%s\n' "$*" >&2; exit 2; }
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --root|--mode|--port|--api-port)
+    --root|--mode|--port|--api-port|--project)
       [ "$#" -ge 2 ] || fail "Falta o valor de $1."
       case "$1" in
         --root) INSIGHTS_ROOT="$2";;
         --mode) INSIGHTS_MODE="$2";;
         --port) INSIGHTS_PORT="$2";;
         --api-port) INSIGHTS_API_PORT="$2";;
+        --project) INSIGHTS_PROJECT="$2";;
       esac
       shift 2;;
     --no-browser) INSIGHTS_NO_BROWSER=true; shift;;
@@ -50,8 +54,12 @@ while [ "$#" -gt 0 ]; do
     *) fail "Opcao desconhecida: $1";;
   esac
 done
-case "$INSIGHTS_COMMAND" in setup|start|stop|status|doctor|help|--help|-h) ;; *) fail "Comando desconhecido: $INSIGHTS_COMMAND";; esac
+case "$INSIGHTS_COMMAND" in setup|start|stop|status|doctor|codex|help|--help|-h) ;; *) fail "Comando desconhecido: $INSIGHTS_COMMAND";; esac
 case "$INSIGHTS_MODE" in ""|demo|connected) ;; *) fail "Modo deve ser demo ou connected.";; esac
+case "$INSIGHTS_PROJECT" in all|frontend|backend) ;; *) fail "Projeto deve ser frontend, backend ou all.";; esac
+if [ "$INSIGHTS_COMMAND" != codex ] && [ "$INSIGHTS_PROJECT" != all ]; then
+  fail "Use codex para selecionar um projeto."
+fi
 for INSIGHTS_PORT_VALUE in "$INSIGHTS_PORT" "$INSIGHTS_API_PORT"; do
   if [ -n "$INSIGHTS_PORT_VALUE" ]; then
     [[ "$INSIGHTS_PORT_VALUE" =~ ^[0-9]{1,5}$ ]] || fail "Porta invalida."
@@ -66,6 +74,27 @@ if [ "$INSIGHTS_COMMAND" != setup ] && { [ -n "$INSIGHTS_MODE" ] || [ -n "$INSIG
   fail "Use setup para alterar modo ou portas."
 fi
 export PATH="$HOME/.local/bin:$HOME/.docker/bin:/Applications/Docker.app/Contents/Resources/bin:$PATH"
+
+open_codex() {
+  INSIGHTS_CODEX_LINKS=()
+  for INSIGHTS_NAME in frontend backend; do
+    if [ "$INSIGHTS_PROJECT" != all ] && [ "$INSIGHTS_PROJECT" != "$INSIGHTS_NAME" ]; then continue; fi
+    INSIGHTS_LINK="$INSIGHTS_ROOT/.local/codex/$INSIGHTS_NAME.link"
+    [ -f "$INSIGHTS_LINK" ] || fail "Atalhos Codex ausentes. Execute setup novamente na mesma pasta."
+    [ -d "$INSIGHTS_ROOT/sources/$INSIGHTS_NAME/.git" ] || fail "Pasta do aplicativo $INSIGHTS_NAME ausente. Execute setup."
+    INSIGHTS_URL="$(cat "$INSIGHTS_LINK")"
+    [[ "$INSIGHTS_URL" =~ ^codex://new\?path=[a-zA-Z0-9%._~-]+$ ]] || fail "Atalho Codex invalido. Execute setup novamente."
+    INSIGHTS_CODEX_LINKS+=("$INSIGHTS_URL")
+  done
+  case "$(uname -s)" in
+    Darwin) INSIGHTS_OPENER=open;;
+    Linux) INSIGHTS_OPENER=xdg-open;;
+    *) fail "Use local.ps1 no Windows.";;
+  esac
+  command -v "$INSIGHTS_OPENER" >/dev/null || fail "Abra .local/codex-projects.html no navegador para usar os atalhos Codex."
+  for INSIGHTS_URL in "${INSIGHTS_CODEX_LINKS[@]}"; do "$INSIGHTS_OPENER" "$INSIGHTS_URL"; done
+  printf '%s\n' "Solicitada a abertura das pastas no Codex. Confira se aparecem como projetos na barra lateral."
+}
 
 admin() {
   if [ "$(id -u)" -eq 0 ]; then "$@"
@@ -191,9 +220,9 @@ ensure_bundle() {
   INSIGHTS_ROOT="$(cd "$INSIGHTS_ROOT" && pwd)"
   if [ -f "$INSIGHTS_ROOT/scripts/bootstrap_local.py" ]; then return; fi
   INSIGHTS_TMP="$(mktemp -d)"
-  curl --fail --silent --show-error --location https://github.com/avanti/insights-local/archive/refs/tags/v0.1.0.zip -o "$INSIGHTS_TMP/starter.zip"
+  curl --fail --silent --show-error --location https://github.com/avanti/insights-local/archive/refs/tags/v0.1.1.zip -o "$INSIGHTS_TMP/starter.zip"
   unzip -q "$INSIGHTS_TMP/starter.zip" -d "$INSIGHTS_TMP/unpacked"
-  cp -R "$INSIGHTS_TMP/unpacked/insights-local-0.1.0/." "$INSIGHTS_ROOT/"
+  cp -R "$INSIGHTS_TMP/unpacked/insights-local-0.1.1/." "$INSIGHTS_ROOT/"
   rm -rf "$INSIGHTS_TMP"
 }
 
@@ -246,6 +275,7 @@ start_stack() {
   INSIGHTS_WEB_PORT="$(value LOCAL_WEB_PORT "$INSIGHTS_ROOT/.local/compose.env")"
   curl --fail --silent --show-error --max-time 30 "http://127.0.0.1:$INSIGHTS_WEB_PORT/login" -o /dev/null
   printf '%s\n' "Interface: http://localhost:$INSIGHTS_WEB_PORT" "Usuario e senha: $INSIGHTS_ROOT/.local/access.txt"
+  printf '%s\n' "Atalhos para o Codex: $INSIGHTS_ROOT/.local/codex-projects.html"
   if [ "$INSIGHTS_NO_BROWSER" = false ]; then
     case "$(uname -s)" in
       Darwin) open "http://localhost:$INSIGHTS_WEB_PORT";;
@@ -262,7 +292,9 @@ case "$INSIGHTS_COMMAND" in
     checkout_source backend BACKEND
     checkout_source frontend FRONTEND
     if [ -f "$INSIGHTS_ROOT/.local/compose.env" ]; then compose down --remove-orphans; fi
-    INSIGHTS_CONFIG_ARGS=(configure)
+    INSIGHTS_HOST_PLATFORM=linux
+    if [ "$(uname -s)" = Darwin ]; then INSIGHTS_HOST_PLATFORM=macos; fi
+    INSIGHTS_CONFIG_ARGS=(configure --host-root "$INSIGHTS_ROOT" --host-platform "$INSIGHTS_HOST_PLATFORM")
     if [ -n "$INSIGHTS_MODE" ]; then INSIGHTS_CONFIG_ARGS+=(--mode "$INSIGHTS_MODE"); fi
     if [ -n "$INSIGHTS_PORT" ]; then INSIGHTS_CONFIG_ARGS+=(--port "$INSIGHTS_PORT"); fi
     if [ -n "$INSIGHTS_API_PORT" ]; then INSIGHTS_CONFIG_ARGS+=(--api-port "$INSIGHTS_API_PORT"); fi
@@ -272,6 +304,7 @@ case "$INSIGHTS_COMMAND" in
     start_stack;;
   start) select_docker; start_stack;;
   stop) select_docker; compose down --remove-orphans;;
+  codex) open_codex;;
   status)
     select_docker
     compose ps

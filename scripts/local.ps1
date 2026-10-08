@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('setup', 'start', 'stop', 'status', 'doctor', 'help')]
+    [ValidateSet('setup', 'start', 'stop', 'status', 'doctor', 'codex', 'help')]
     [string]$Command = 'help',
     [string]$Root,
     [ValidateSet('demo', 'connected')]
@@ -12,7 +12,9 @@ param(
     [ValidateRange(1024, 65535)]
     [int]$ApiPort,
     [switch]$NoBrowser,
-    [switch]$NonInteractive
+    [switch]$NonInteractive,
+    [ValidateSet('frontend', 'backend', 'all')]
+    [string]$Project = 'all'
 )
 $ErrorActionPreference = 'Stop'
 $script:DockerContext = $env:INSIGHTS_DOCKER_CONTEXT
@@ -27,10 +29,29 @@ $Root = [IO.Path]::GetFullPath($Root)
 
 function Show-Usage {
     Write-Host 'Avanti Insights local'
-    Write-Host '.\scripts\local.ps1 <setup|start|stop|status|doctor|help>'
+    Write-Host '.\scripts\local.ps1 <setup|start|stop|status|doctor|codex|help>'
     Write-Host 'Opcoes: -Root PASTA -Mode demo|connected -Port 3000 -ApiPort 8000 -NoBrowser -NonInteractive'
     Write-Host 'setup instala dependencias ausentes, clona, configura e inicia.'
     Write-Host 'Os outros comandos nao instalam software.'
+    Write-Host 'codex -Project frontend|backend|all abre as pastas no Codex (padrao all).'
+    Write-Host 'Confira o cadastro dos projetos na barra lateral do aplicativo.'
+}
+
+function Open-Codex {
+    $links = @()
+    foreach ($name in @('frontend', 'backend')) {
+        if ($Project -ne 'all' -and $Project -ne $name) { continue }
+        $link = Join-Path $Root (".local\codex\$name.link")
+        if (-not (Test-Path $link)) { throw 'Atalhos Codex ausentes. Execute setup novamente na mesma pasta.' }
+        if (-not (Test-Path (Join-Path $Root "sources\$name\.git") -PathType Container)) {
+            throw "Pasta do aplicativo $name ausente. Execute setup."
+        }
+        $url = [IO.File]::ReadAllText($link).Trim()
+        if ($url -cnotmatch '^codex://new\?path=[a-zA-Z0-9%._~-]+$') { throw 'Atalho Codex invalido. Execute setup novamente.' }
+        $links += $url
+    }
+    foreach ($url in $links) { Start-Process -FilePath $url }
+    Write-Host 'Solicitada a abertura das pastas no Codex. Confira se aparecem como projetos na barra lateral.'
 }
 
 function Invoke-Native {
@@ -137,9 +158,9 @@ function Ensure-Bundle {
     New-Item -ItemType Directory -Path $temp | Out-Null
     try {
         $zip = Join-Path $temp 'starter.zip'
-        Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/avanti/insights-local/archive/refs/tags/v0.1.0.zip' -OutFile $zip
+        Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/avanti/insights-local/archive/refs/tags/v0.1.1.zip' -OutFile $zip
         Expand-Archive -Path $zip -DestinationPath $temp
-        Get-ChildItem -Force (Join-Path $temp 'insights-local-0.1.0') |
+        Get-ChildItem -Force (Join-Path $temp 'insights-local-0.1.1') |
             Copy-Item -Destination $Root -Recurse -Force
     } finally {
         Remove-Item -Recurse -Force $temp
@@ -228,11 +249,13 @@ function Start-Stack {
     Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$webPort/login" -TimeoutSec 30 | Out-Null
     Write-Host "Interface: http://localhost:$webPort"
     Write-Host ('Usuario e senha: ' + (Join-Path $Root '.local\access.txt'))
+    Write-Host ('Atalhos para o Codex: ' + (Join-Path $Root '.local\codex-projects.html'))
     if (-not $NoBrowser) { Start-Process "http://localhost:$webPort" }
 }
 
 try {
     if ($Command -eq 'help') { Show-Usage; exit 0 }
+    if ($Command -ne 'codex' -and $Project -ne 'all') { throw 'Use codex para selecionar um projeto.' }
     if ($Command -ne 'setup' -and ($Mode -or $Port -or $ApiPort)) { throw 'Use setup para alterar modo ou portas.' }
     switch ($Command) {
         'setup' {
@@ -242,7 +265,7 @@ try {
             Ensure-Source 'backend' 'BACKEND'
             Ensure-Source 'frontend' 'FRONTEND'
             if (Test-Path (Join-Path $Root '.local\compose.env')) { Invoke-Compose @('down', '--remove-orphans') }
-            $configArgs = @('configure')
+            $configArgs = @('configure', '--host-root', $Root, '--host-platform', 'windows')
             if ($Mode) { $configArgs += @('--mode', $Mode) }
             if ($Port) { $configArgs += @('--port', "$Port") }
             if ($ApiPort) { $configArgs += @('--api-port', "$ApiPort") }
@@ -252,6 +275,7 @@ try {
         }
         'start' { Select-Docker; Start-Stack }
         'stop' { Select-Docker; Invoke-Compose @('down', '--remove-orphans') }
+        'codex' { Open-Codex }
         'status' {
             Select-Docker
             Invoke-Compose @('ps')

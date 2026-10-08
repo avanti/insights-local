@@ -41,6 +41,14 @@ Copie este pedido para uma conversa local no Codex:
 > Execute doctor, confirme o login e a sessao pela interface e abra o endereco
 > local no navegador. Abra .local/access.txt no editor para eu consultar o
 > acesso, sem colocar senhas ou tokens no chat.
+>
+> Depois do setup, execute scripts/local.ps1 codex no Windows ou
+> bash scripts/local.sh codex no macOS/Linux para abrir frontend e backend
+> no Codex pelos atalhos gerados. Confira, pelas ferramentas disponiveis, se
+> as duas pastas aparecem como projetos na barra lateral. Se o cadastro nao
+> estiver confirmado, mostre os caminhos de .local/codex-projects.json e
+> oriente-me a usar Criar projeto para selecionar cada pasta. Nao declare que
+> os projetos foram cadastrados apenas porque os links foram abertos.
 
 O Codex deve escolher uma pasta permanente da pessoa, fora de pastas temporarias.
 Quando necessario, a pessoa conclui o login GitHub pelo navegador, informa sua
@@ -77,17 +85,56 @@ Referencias: [Docker Compose](https://docs.docker.com/compose/install/),
 
 ## Comandos
 
-Os dois scripts aceitam setup, start, stop, status, doctor e help.
+Os dois scripts aceitam setup, start, stop, status, doctor, codex e help.
 
 - setup instala, clona, gera configuracao e inicia. Pode ser repetido.
 - start sobe o ambiente configurado e verifica login e sessao.
 - stop para somente a stack local e preserva dados.
 - status mostra containers, modo e endereco da interface.
 - doctor verifica dependencias, Compose e login; nao instala software.
+- codex abre uma conversa no Codex para cada pasta dos aplicativos; nao instala
+  software nem precisa que os containers estejam em execucao.
 
 No Windows use -Mode, -Port, -ApiPort, -NoBrowser e -NonInteractive.
 No Bash use --mode, --port, --api-port, --no-browser e --non-interactive.
 Modo e portas sao alterados por setup.
+
+## Abrir os aplicativos no Codex
+
+setup gera os atalhos usando os caminhos absolutos das pastas no computador,
+mesmo quando a configuracao e preparada dentro do Docker:
+
+- .local/codex-projects.html: pagina com links para frontend e backend.
+- .local/codex-projects.json: caminhos e links para o Codex consultar.
+- .local/codex/frontend.webloc e backend.webloc no macOS, ou frontend.url e
+  backend.url no Windows: atalhos que podem ser abertos com duplo clique.
+
+Para abrir as duas pastas, peça ao Codex para executar o comando codex do
+instalador. Para abrir apenas uma, use:
+
+```bash
+bash scripts/local.sh codex --project frontend
+bash scripts/local.sh codex --project backend
+```
+
+```powershell
+.\scripts\local.ps1 codex -Project frontend
+.\scripts\local.ps1 codex -Project backend
+```
+
+Se a instalacao foi preparada com uma versao anterior, execute setup novamente
+na mesma pasta para gerar os atalhos, preservando os dados existentes.
+
+Os atalhos usam o link documentado codex://new?path=... para abrir uma conversa
+na pasta de cada aplicativo. O sistema ou navegador pode pedir confirmacao para
+abrir o Codex. Esse recurso nao garante o cadastro permanente dos projetos na
+barra lateral. Confira no aplicativo; se necessario, use Criar projeto e
+selecione sources/frontend e sources/backend dentro da pasta do instalador.
+O Codex deve informar o caminho completo de cada pasta para facilitar a selecao.
+
+Referencia: [links do aplicativo na documentacao oficial](https://learn.chatgpt.com/docs/app/commands#deep-links).
+
+## Enderecos e acesso local
 
 Exemplo para portas ocupadas:
 

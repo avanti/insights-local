@@ -15,6 +15,15 @@ Este repositorio publico prepara dois aplicativos privados da organizacao Avanti
   acompanhe a instalacao e confirme /usr/bin/git --version antes de continuar.
   Use as Xcode Command Line Tools; o aplicativo Xcode completo nao e necessario.
 - Execute doctor e a verificacao de login antes de declarar o ambiente pronto.
+- Quando a pessoa solicitar abrir ou adicionar os aplicativos ao Codex, use
+  scripts/local.ps1 codex ou bash scripts/local.sh codex depois de setup.
+  Os links e caminhos absolutos estao em .local/codex-projects.json; a pagina
+  .local/codex-projects.html e os atalhos nativos oferecem a mesma abertura.
+  Verifique, com list_projects quando disponivel, se as duas pastas ja estao
+  cadastradas como projetos. Abrir uma conversa por link nao confirma o cadastro.
+  Se nao houver ferramenta para cadastrar uma pasta, informe os caminhos completos
+  e oriente a pessoa a usar Criar projeto. Nao altere bancos ou arquivos internos
+  do aplicativo Codex para forcar o cadastro.
 - Nunca imprima .local/*.env, secrets.json, access.txt, tokens ou senhas no chat.
   Abra access.txt no editor local para a pessoa consultar o primeiro acesso.
 - sources/ e .local/ sao privados e ignorados pelo Git. Publique apenas arquivos
