@@ -63,3 +63,6 @@ try {
     $env:COMPOSE_PROFILES = $originalProfiles
     Remove-Item -Recurse -Force $fixture
 }
+# The expected rejection above leaves exit code 2; CI propagates LASTEXITCODE.
+# Reach this line only after all assertions and cleanup complete successfully.
+$global:LASTEXITCODE = 0
