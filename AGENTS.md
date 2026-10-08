@@ -9,6 +9,11 @@ Este repositorio publico prepara dois aplicativos privados da organizacao Avanti
   termos do Docker e reinicializacao devem ser concluidos pela pessoa quando exigidos.
 - Se o Git estiver ausente, instale-o pelo mecanismo oficial do sistema e confirme
   que git funciona antes de clonar este repositorio, conforme o prompt no README.
+- No macOS, execute /usr/bin/xcode-select --install pelas ferramentas locais do
+  Codex quando o Git estiver indisponivel. Nao delegue a pessoa a abertura do
+  Terminal nem a copia de comandos. Peça apenas as confirmacoes da janela do macOS,
+  acompanhe a instalacao e confirme /usr/bin/git --version antes de continuar.
+  Use as Xcode Command Line Tools; o aplicativo Xcode completo nao e necessario.
 - Execute doctor e a verificacao de login antes de declarar o ambiente pronto.
 - Nunca imprima .local/*.env, secrets.json, access.txt, tokens ou senhas no chat.
   Abra access.txt no editor local para a pessoa consultar o primeiro acesso.

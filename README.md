@@ -17,6 +17,14 @@ Copie este pedido para uma conversa local no Codex:
 > baixe e instale o Git usando o instalador oficial ou o gerenciador de pacotes
 > adequado ao sistema. Confirme que o comando git funciona antes de continuar.
 >
+> No macOS, se o Git estiver indisponivel, execute voce mesmo
+> /usr/bin/xcode-select --install pelas ferramentas locais do Codex para iniciar
+> a instalacao das Xcode Command Line Tools. Nao me peca para abrir o Terminal
+> ou copiar comandos. Oriente-me apenas a confirmar a instalacao e aceitar os
+> termos na janela do macOS, quando aparecerem. Acompanhe a instalacao e
+> verifique /usr/bin/git --version ate funcionar; depois continue com o clone.
+> Nao instale o aplicativo Xcode completo, pois ele nao e necessario aqui.
+>
 > Escolha uma pasta permanente no meu computador e execute
 > git clone https://github.com/avanti/insights-local.git. Entre na pasta clonada
 > e leia README.md e AGENTS.md. Se ja existir uma instalacao, use essa pasta e
@@ -37,7 +45,10 @@ Copie este pedido para uma conversa local no Codex:
 O Codex deve escolher uma pasta permanente da pessoa, fora de pastas temporarias.
 Quando necessario, a pessoa conclui o login GitHub pelo navegador, informa sua
 senha de administrador, aceita os termos do Docker ou reinicia o computador.
-Depois basta pedir ao Codex para executar setup novamente.
+No macOS, a pessoa tambem confirma a janela de instalacao das ferramentas Apple.
+O Codex executa os comandos e retoma a preparacao depois dessas confirmacoes.
+Se uma reinicializacao interromper a conversa, basta pedir ao Codex para continuar
+usando a mesma pasta e executar setup novamente.
 
 ## Dependencias e sistemas
 
@@ -45,8 +56,11 @@ Depois basta pedir ao Codex para executar setup novamente.
   App Installer/winget e PowerShell 5.1 ou posterior. O script instala Git,
   GitHub CLI, prepara WSL quando necessario e instala Docker Desktop.
 - macOS: Intel ou Apple Silicon, numa versao suportada pelo Docker Desktop.
-  O script instala Git via ferramentas Apple quando ausente, GitHub CLI e Docker Desktop.
-  A instalacao das ferramentas Apple precisa ser concluida na janela do sistema.
+  O Codex inicia a instalacao das Xcode Command Line Tools quando o Git esta ausente,
+  antes de clonar o instalador. Esse pacote inclui Git e ferramentas de compilacao;
+  o aplicativo Xcode completo nao e necessario. A pessoa confirma a instalacao na
+  janela do sistema, e o Codex continua quando o Git estiver disponivel.
+  O script instala GitHub CLI e Docker Desktop e tambem verifica o Git.
 - Linux: instalacao automatica em Ubuntu, Debian e Fedora suportados pelo Docker.
   Instala Git, GitHub CLI, curl, unzip, Docker Engine e Compose. Outras distribuicoes
   podem usar o instalador depois de instalar essas dependencias manualmente.
