@@ -1,0 +1,12 @@
+**
+!sources/
+!sources/frontend/
+!sources/frontend/**
+sources/frontend/.git
+sources/frontend/node_modules
+sources/frontend/.next
+sources/frontend/.env*
+sources/frontend/.rag_cache
+sources/frontend/tmp_uploads
+!docker/
+!docker/frontend.Dockerfile

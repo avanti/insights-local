@@ -1,0 +1,137 @@
+name: insights-local
+
+x-backend: &backend
+  image: insights-local-backend:${LOCAL_BACKEND_REF}
+  build:
+    context: ./sources/backend
+  env_file:
+    - ./.local/backend.env
+  environment:
+    PYTHONPATH: /app
+  volumes:
+    - ./scripts:/opt/insights-local/scripts:ro
+    - local_temp:/tmp
+  networks:
+    - local
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: avanti_insights
+      POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD}
+    volumes:
+      - local_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d avanti_insights"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [local]
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [local]
+
+  bootstrap:
+    <<: *backend
+    command: ["python", "/opt/insights-local/scripts/bootstrap_local.py", "seed"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  api:
+    <<: *backend
+    command: ["python", "/opt/insights-local/scripts/bootstrap_local.py", "serve"]
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,urllib.request; urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8000/health_check',headers={'X-Health-Token':os.environ['HEALTHCHECK_TOKEN']}),timeout=5)"
+      interval: 5s
+      timeout: 10s
+      start_period: 60s
+      retries: 30
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    env_file:
+      - ./.local/frontend.env
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.status<400?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 30s
+      start_period: 120s
+      retries: 30
+    networks: [local]
+
+  gateway:
+    image: nginx:alpine
+    ports:
+      - "127.0.0.1:${LOCAL_WEB_PORT}:3000"
+      - "127.0.0.1:${LOCAL_API_PORT}:8000"
+    volumes:
+      - ./.local/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/login"]
+      interval: 10s
+      timeout: 30s
+      retries: 20
+    networks: [local, ingress]
+
+  worker:
+    <<: *backend
+    profiles: [connected]
+    command: ["celery", "-A", "app.core.celery", "worker", "--loglevel=info", "-Q", "celery", "--concurrency=2"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  playwright_worker:
+    <<: *backend
+    profiles: [connected]
+    command: ["celery", "-A", "app.core.celery", "worker", "--loglevel=info", "-Q", "playwright", "--concurrency=1", "--prefetch-multiplier=1", "--max-tasks-per-child=1"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  scheduler:
+    <<: *backend
+    profiles: [connected]
+    command: ["python", "-m", "app.scheduler"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+networks:
+  local:
+    internal: ${LOCAL_NETWORK_INTERNAL}
+  ingress:
+
+volumes:
+  local_postgres:
+  local_temp:

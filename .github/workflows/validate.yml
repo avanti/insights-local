@@ -1,0 +1,28 @@
+name: Validate installer
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  scripts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Configuration and launcher contracts
+        run: python -m unittest discover -s tests -v
+      - name: Bash syntax and help
+        shell: bash
+        run: |
+          bash -n scripts/local.sh
+          bash scripts/local.sh help
+      - name: PowerShell syntax and command contracts
+        shell: pwsh
+        run: ./tests/test_powershell.ps1
