@@ -12,46 +12,32 @@ deste repositorio.
 
 Copie este pedido para uma conversa local no Codex:
 
-> Prepare o Avanti Insights local neste computador usando
-> https://github.com/avanti/insights-local. Baixe a release v0.1.0 numa pasta
-> permanente, leia AGENTS.md e execute setup em modo demo. Instale as dependencias
-> ausentes e confirme o login pela interface. Abra .local/access.txt no editor
-> para eu consultar o acesso, sem colocar senhas no chat.
+> Prepare o Avanti Insights local neste computador. Identifique se estou usando
+> Windows, macOS ou Linux e verifique se o Git esta instalado. Se estiver ausente,
+> baixe e instale o Git usando o instalador oficial ou o gerenciador de pacotes
+> adequado ao sistema. Confirme que o comando git funciona antes de continuar.
+>
+> Escolha uma pasta permanente no meu computador e execute
+> git clone https://github.com/avanti/insights-local.git. Entre na pasta clonada
+> e leia README.md e AGENTS.md. Se ja existir uma instalacao, use essa pasta e
+> preserve meus arquivos e dados.
+>
+> Execute scripts/local.ps1 setup -Mode demo no Windows ou
+> bash scripts/local.sh setup --mode demo no macOS/Linux. Instale as dependencias
+> ausentes, incluindo GitHub CLI, Docker e Docker Compose, clone os projetos
+> privados indicados em sources.lock e faca as configuracoes necessarias para
+> iniciar frontend, backend e banco localmente. Quando o sistema exigir minha
+> intervencao para login GitHub, permissao de administrador, termos do Docker ou
+> reinicializacao, explique o passo e retome a preparacao depois que eu concluir.
+>
+> Execute doctor, confirme o login e a sessao pela interface e abra o endereco
+> local no navegador. Abra .local/access.txt no editor para eu consultar o
+> acesso, sem colocar senhas ou tokens no chat.
 
 O Codex deve escolher uma pasta permanente da pessoa, fora de pastas temporarias.
 Quando necessario, a pessoa conclui o login GitHub pelo navegador, informa sua
 senha de administrador, aceita os termos do Docker ou reinicia o computador.
 Depois basta pedir ao Codex para executar setup novamente.
-
-## Sem Git ou outras ferramentas instaladas
-
-Baixe e extraia [o ZIP da release v0.1.0](https://github.com/avanti/insights-local/archive/refs/tags/v0.1.0.zip).
-O ZIP inclui tudo para iniciar a preparacao. Python e Node.js sao usados apenas
-nos containers.
-
-Windows, a partir da pasta extraida:
-
-```powershell
-.\scripts\local.ps1 setup
-```
-
-macOS ou Linux:
-
-```bash
-bash scripts/local.sh setup
-```
-
-Se o Windows impedir a execucao do arquivo baixado, a pessoa ou o Codex pode
-executar o arquivo revisado em um processo separado, sem alterar a politica global:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\local.ps1 setup
-```
-
-Tambem e possivel baixar apenas [local.ps1](https://raw.githubusercontent.com/avanti/insights-local/v0.1.0/scripts/local.ps1)
-ou [local.sh](https://raw.githubusercontent.com/avanti/insights-local/v0.1.0/scripts/local.sh).
-Nesse caso, use -Root no PowerShell ou --root no Bash para escolher a pasta.
-O script avulso baixa o restante da mesma release antes de clonar os aplicativos.
 
 ## Dependencias e sistemas
 

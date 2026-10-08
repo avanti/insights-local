@@ -7,7 +7,8 @@ Este repositorio publico prepara dois aplicativos privados da organizacao Avanti
 - Comece em modo demo, a menos que a pessoa solicite explicitamente connected.
 - Verifique acesso aos repositorios de sources.lock. Login GitHub, senha sudo,
   termos do Docker e reinicializacao devem ser concluidos pela pessoa quando exigidos.
-- Para iniciar sem Git, baixe o ZIP da release ou o script avulso descrito no README.
+- Se o Git estiver ausente, instale-o pelo mecanismo oficial do sistema e confirme
+  que git funciona antes de clonar este repositorio, conforme o prompt no README.
 - Execute doctor e a verificacao de login antes de declarar o ambiente pronto.
 - Nunca imprima .local/*.env, secrets.json, access.txt, tokens ou senhas no chat.
   Abra access.txt no editor local para a pessoa consultar o primeiro acesso.
