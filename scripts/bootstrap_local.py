@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime, timedelta, timezone
 import html
 import json
 import os
@@ -16,17 +15,68 @@ import sys
 import tempfile
 import uuid
 from urllib.parse import quote
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 REQUIRED_INTEGRATIONS = (
     "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY", "AWS_S3_BUCKET", "SLACK_BOT_TOKEN",
+    "MARKETING_HUB_API_KEY",
+    "GA4_CREDENTIALS_PRIVATE_KEY_B64", "GA4_CREDENTIALS_KEY_ID",
+    "GA4_CREDENTIALS_SERVICE_TOKEN",
 )
+DEFAULT_MARKETING_HUB_BASE_URL = "https://100.55.149.93.nip.io"
 LOCAL_ADMIN_EMAIL = "admin@example.com"
-AUTH_WRITES = {
-    "/api/auth/jwt/login", "/api/auth/jwt/logout", "/api/auth/refresh",
-}
-DEMO_DETAIL = "Modo demonstracao: operacao desativada. Use o modo connected para executar analises."
+
+
+def validate_credentials(values: dict[str, str]) -> dict[str, str]:
+    missing = [key for key in REQUIRED_INTEGRATIONS
+               if not values.get(key) or values[key] == "local-demo-disabled"]
+    for prefix in ("MERCHANT", "JOBBER"):
+        if values.get(f"{prefix}_MCP_ENABLED", "false").lower() in {"true", "1", "yes", "on"}:
+            if not values.get(f"{prefix}_MCP_URL"):
+                missing.append(f"{prefix}_MCP_URL")
+            if values.get(f"{prefix}_MCP_AUTH_REQUIRED", "false").lower() in {"true", "1", "yes", "on"}:
+                # The Jobber client uses the shared Merchant transport token.
+                if not values.get("MERCHANT_MCP_AUTH_TOKEN"):
+                    missing.append("MERCHANT_MCP_AUTH_TOKEN")
+    if values.get("GITHUB_MCP_ENABLED", "false").lower() in {"true", "1", "yes", "on"}:
+        missing.extend(key for key in ("GITHUB_CREDENTIALS_PRIVATE_KEY_B64", "GITHUB_CREDENTIALS_KEY_ID",
+                                       "GITHUB_CREDENTIALS_SERVICE_TOKEN") if not values.get(key))
+    if missing:
+        raise ValueError("Credenciais incompletas no segredo AWS ou em .local/integrations.override.env: "
+                         + ", ".join(sorted(set(missing))))
+    hub = urlparse(values.get("MARKETING_HUB_BASE_URL") or DEFAULT_MARKETING_HUB_BASE_URL)
+    if hub.scheme != "https" or not hub.hostname or hub.username or hub.password or hub.query or hub.fragment:
+        raise ValueError("MARKETING_HUB_BASE_URL deve ser um endereco HTTPS sem credenciais, query ou fragmento.")
+    return values
+
+
+def import_secret(root: Path, raw: str, require_complete: bool = False) -> None:
+    """Consume AWS JSON over stdin; never log or save the raw secret response."""
+    if require_complete:
+        marker = "\nINSIGHTS_SECRET_COMPLETE\n"
+        if not raw.endswith(marker):
+            raise ValueError("A consulta AWS nao terminou com sucesso. Configuracao anterior preservada.")
+        raw = raw[:-len(marker)]
+    try:
+        values = json.loads(raw.lstrip("\ufeff"))
+        if isinstance(values, str):
+            values = json.loads(values)
+    except (ValueError, TypeError):
+        raise ValueError("Nao foi possivel ler o segredo AWS como JSON. Nenhum valor foi exibido.") from None
+    if not isinstance(values, dict) or not values:
+        raise ValueError("O segredo AWS deve conter um objeto JSON nao vazio.")
+    for key, value in values.items():
+        if not re.fullmatch(r"[A-Z_][A-Z_0-9]*", key) or not isinstance(value, str):
+            raise ValueError("O segredo deve conter nomes de variaveis validos e valores de texto.")
+        if key == "GOOGLE_SHEETS_PRIVATE_KEY":
+            values[key] = value.replace("\r\n", "\n").replace("\n", "\\n")
+    overrides = read_env(root / ".local" / "integrations.override.env")
+    validate_credentials({**values, **overrides})
+    content = env_text(values)
+    private_write(root / ".local" / "integrations.env", content)
+    print("Credenciais obtidas da AWS e salvas com acesso restrito. Valores nao exibidos.")
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -55,7 +105,7 @@ def env_text(values: dict[str, str]) -> str:
     lines = []
     for key, value in values.items():
         value = str(value)
-        if "\n" in value or "\r" in value:
+        if "\n" in value or "\r" in value or "\x00" in value:
             raise ValueError(f"{key}: use um valor em uma unica linha.")
         quoted = value.replace("'", "\\'")
         lines.append(f"{key}='{quoted}'")
@@ -119,15 +169,13 @@ A abertura da conversa nao garante o cadastro permanente do projeto.</p>
     return files
 
 
-def configure(root: Path, mode: str | None, port: int | None, api_port: int | None,
+def configure(root: Path, port: int | None = None, api_port: int | None = None,
               host_root: str | None = None, host_platform: str | None = None) -> dict:
     local = root / ".local"
     platform = host_platform or ("windows" if os.name == "nt" else "macos" if sys.platform == "darwin" else "linux")
     shortcuts = codex_shortcuts(host_root or str(root.resolve()), platform)
     previous = json.loads((local / "settings.json").read_text()) if (local / "settings.json").exists() else {}
-    selected_mode = mode or previous.get("mode", "demo")
-    if selected_mode not in {"demo", "connected"}:
-        raise ValueError("Modo invalido.")
+    selected_mode = "connected"
     web_port = port if port is not None else previous.get("port", 3000)
     backend_port = api_port if api_port is not None else previous.get("api_port", 8000)
     if not all(isinstance(v, int) and 1024 <= v <= 65535 for v in (web_port, backend_port)):
@@ -135,13 +183,8 @@ def configure(root: Path, mode: str | None, port: int | None, api_port: int | No
     if web_port == backend_port:
         raise ValueError("Front-end e API precisam de portas diferentes.")
 
-    credentials = read_env(local / "integrations.env") if selected_mode == "connected" else {}
-    missing = [key for key in REQUIRED_INTEGRATIONS if not credentials.get(key)]
-    if selected_mode == "connected" and missing:
-        local.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if not (local / "integrations.env").exists():
-            private_write(local / "integrations.env", (root / ".env.example").read_text())
-        raise ValueError("Preencha .local/integrations.env: " + ", ".join(missing))
+    credentials = validate_credentials({**read_env(local / "integrations.env"),
+                                        **read_env(local / "integrations.override.env")})
 
     lock = read_env(root / "sources.lock")
     for key in ("BACKEND_REF", "FRONTEND_REF"):
@@ -152,8 +195,6 @@ def configure(root: Path, mode: str | None, port: int | None, api_port: int | No
         stored.setdefault(key, secrets.token_urlsafe(32))
     if stored["secret_key"] == stored["refresh_pepper"]:
         raise ValueError("Chaves de sessao devem ser distintas.")
-    if selected_mode == "demo":
-        credentials = {key: "local-demo-disabled" for key in REQUIRED_INTEGRATIONS}
 
     app_url = f"http://localhost:{web_port}"
     backend = {
@@ -169,13 +210,16 @@ def configure(root: Path, mode: str | None, port: int | None, api_port: int | No
         "DEBUG_MODE": "true",
         "DATABASE_SSL_MODE": "disable",
         "DATABASE_URL": f"postgresql+asyncpg://postgres:{stored['db_password']}@db:5432/avanti_insights",
+        "POSTGRES_PASSWORD": stored["db_password"],
         "CELERY_BROKER_URL": "redis://redis:6379/0",
         "CELERY_RESULT_BACKEND": "redis://redis:6379/0",
         "FRONTEND_URL": app_url,
         "CORS_ORIGINS": f"{app_url},http://127.0.0.1:{web_port}",
         "OPENAI_MODEL": credentials.get("OPENAI_MODEL") or "gpt-5.4-mini",
         "AWS_REGION": credentials.get("AWS_REGION") or "us-east-1",
-        "MARKETING_HUB_BASE_URL": credentials.get("MARKETING_HUB_BASE_URL") or "http://disabled.invalid",
+        "MARKETING_HUB_BASE_URL": credentials.get("MARKETING_HUB_BASE_URL") or DEFAULT_MARKETING_HUB_BASE_URL,
+        "MARKETING_HUB_VERIFY_SSL": "true",
+        "GA4_ADC_RUNTIME_DIR": "/run/ga4-credentials",
         "MERCHANT_MCP_ENABLED": credentials.get("MERCHANT_MCP_ENABLED") or "false",
         "JOBBER_MCP_ENABLED": credentials.get("JOBBER_MCP_ENABLED") or "false",
         "GITHUB_MCP_ENABLED": credentials.get("GITHUB_MCP_ENABLED") or "false",
@@ -183,10 +227,10 @@ def configure(root: Path, mode: str | None, port: int | None, api_port: int | No
     frontend = {
         **{
             key: value for key, value in credentials.items()
-            if value and key.startswith((
+            if value and (key in {"ENABLE_LOGGING", "ENABLE_PIPELINE_TIMING"} or key.startswith((
                 "OPENAI_", "ANTHROPIC_", "GOOGLE_", "SHEETS_", "RAG_",
                 "CRO_", "JIRA_", "MAIL_", "RESEND_", "GEMINI_",
-            ))
+            )))
         },
         "NODE_ENV": "development",
         "NEXT_PUBLIC_APP_URL": app_url,
@@ -204,7 +248,6 @@ def configure(root: Path, mode: str | None, port: int | None, api_port: int | No
         "LOCAL_WEB_PORT": str(web_port),
         "LOCAL_API_PORT": str(backend_port),
         "LOCAL_DB_PASSWORD": stored["db_password"],
-        "LOCAL_NETWORK_INTERNAL": "true" if selected_mode == "demo" else "false",
         "LOCAL_BACKEND_REF": lock["BACKEND_REF"],
         "LOCAL_FRONTEND_REF": lock["FRONTEND_REF"],
     }
@@ -217,8 +260,13 @@ def configure(root: Path, mode: str | None, port: int | None, api_port: int | No
         "compose.env": env_text(compose),
         "secrets.json": json.dumps(stored, indent=2) + "\n",
         "settings.json": json.dumps(settings, indent=2) + "\n",
-        "nginx.conf": (root / "templates" / f"nginx.{selected_mode}.conf").read_text(),
-        "access.txt": f"Modo: {selected_mode}\nInterface: {app_url}\nUsuario: {LOCAL_ADMIN_EMAIL}\nSenha: {stored['admin_password']}\n",
+        "nginx.conf": (root / "templates" / "nginx.conf").read_text(),
+        "access.txt": (
+            f"Modo: {selected_mode}\nInterface: {app_url}\n"
+            f"Usuario: {LOCAL_ADMIN_EMAIL}\nSenha: {stored['admin_password']}\n\n"
+            "Contas sinteticas do Review App usam a mesma senha. Consulte a lista em "
+            "sources/backend/scripts/seed_review_app.py.\n"
+        ),
     }
     for name, content in contents.items():
         private_write(local / name, content)
@@ -229,14 +277,22 @@ def configure(root: Path, mode: str | None, port: int | None, api_port: int | No
 async def seed_database() -> None:
     # Imports are delayed so configure works in a plain Python image.
     from fastapi_users.password import PasswordHelper
-    from sqlalchemy import select
+    from sqlalchemy import select, update
     from app.core.db import AsyncSessionLocal, connect_db, engine
     from app.models.models import (
-        AnalysisHistory, Area, Customer, Goal, Role, User, UserGroup,
+        Customer, Goal, Role, ScheduledTask, User, UserGroup,
         UserGroupGoalAccess, UserPreference, UserRole, UserRoleLink,
     )
     from scripts.seed_goals import seed as seed_goals
     from scripts.seed_permissions import seed as seed_permissions
+    try:
+        from scripts.seed_review_app import seed_review_app, stable_id as review_seed_id
+    except ModuleNotFoundError as exc:
+        if exc.name != "scripts.seed_review_app":
+            raise
+        seed_review_app = None
+        review_seed_id = None
+        print("Seeder do Review App ausente neste checkout existente do backend; banco mantido sem fixtures sintéticas.")
 
     if os.environ.get("DEBUG_MODE") != "true" or "@db:5432/avanti_insights" not in os.environ.get("DATABASE_URL", ""):
         raise RuntimeError("Bootstrap permitido apenas no banco desta stack local.")
@@ -244,6 +300,10 @@ async def seed_database() -> None:
     if len(password) < 12:
         raise RuntimeError("Senha local deve ter pelo menos 12 caracteres.")
     await connect_db()
+    review_seed_exists = True
+    if seed_review_app is not None:
+        async with AsyncSessionLocal() as db:
+            review_seed_exists = await db.get(Customer, review_seed_id("customer", "northstar")) is not None
     await seed_goals()
     await seed_permissions()
     namespace = uuid.UUID("fd920d66-248b-4f0c-9fbd-7936547c0a26")
@@ -282,62 +342,34 @@ async def seed_database() -> None:
             ))
             if link is None:
                 db.add(UserGroupGoalAccess(groupId=group.id, goalType=goal.goalType, enabled=True))
-        if os.environ["LOCAL_MODE"] == "demo":
-            area = await db.get(Area, ident("area"))
-            if area is None:
-                area = Area(id=ident("area"), name="Demonstracao")
-                db.add(area)
-            customer = await db.get(Customer, ident("customer"))
-            if customer is None:
-                customer = Customer(id=ident("customer"), name="Loja demonstracao", slug="loja-demonstracao", description="Cliente ficticio.", active=True)
-                db.add(customer)
-            await db.flush()
-            now = datetime.now(timezone.utc)
-            for index, goal in enumerate(goals[:6]):
-                if await db.get(AnalysisHistory, ident(f"history-{index}")) is None:
-                    timestamp = now - timedelta(days=index + 1)
-                    db.add(AnalysisHistory(
-                        id=ident(f"history-{index}"), threadId=f"insights-local-demo-{index}",
-                        userId=user.id, customerId=customer.id, areaId=area.id,
-                        goal=f"[Demonstracao] {goal.name}", goalType=goal.goalType,
-                        timestamp=timestamp, completedAt=timestamp, filesCount=0,
-                        status="completed", questions={}, answers={},
-                        preview={"summary": "Exemplo ficticio para navegacao."},
-                        analysisData={"summary": "Dados ficticios. Nenhuma analise de IA foi executada."},
-                    ))
         await db.commit()
     await engine.dispose()
+    if seed_review_app is not None and not review_seed_exists:
+        # The Review App uses one password for its synthetic sample users.
+        # Reuse the private local admin password; no extra secret is introduced.
+        os.environ["REVIEW_APP_SEED_PASSWORD"] = password
+        summary = await seed_review_app()
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                update(ScheduledTask)
+                .where(ScheduledTask.taskLabel.like("Review — %"))
+                .values(isActive=False)
+            )
+            await db.commit()
+        await engine.dispose()
+        print(
+            "Dataset sintetico do Review App preparado no banco local: "
+            f"clientes={summary.customers}, historicos={summary.histories}, "
+            f"resumos={summary.summaries}, tarefas de exemplo inativas."
+        )
     print("Banco local preparado. Usuario disponivel: " + LOCAL_ADMIN_EMAIL)
-
-
-def demo_request_allowed(method: str, path: str) -> bool:
-    normalized = path.rstrip("/") or "/"
-    if normalized.startswith("/api/auth/slack"):
-        return False
-    return method in {"GET", "HEAD", "OPTIONS"} or normalized in AUTH_WRITES
-
-
-class DemoGuard:
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] == "http" and not demo_request_allowed(scope["method"], scope["path"]):
-            payload = json.dumps({"detail": DEMO_DETAIL}).encode()
-            await send({"type": "http.response.start", "status": 503, "headers": [(b"content-type", b"application/json")]})
-            await send({"type": "http.response.body", "body": payload})
-            return
-        await self.app(scope, receive, send)
 
 
 def serve() -> None:
     import uvicorn
-    from app.main import app
-    mode = os.environ.get("LOCAL_MODE")
-    if mode not in {"demo", "connected"}:
-        raise RuntimeError("LOCAL_MODE precisa ser demo ou connected.")
-    target = DemoGuard(app) if mode == "demo" else app
-    uvicorn.run(target, host="0.0.0.0", port=8000, access_log=False)
+    # Import string allows Uvicorn to reload the mounted backend source.
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, access_log=False,
+                reload=True, reload_dirs=["/app/app"])
 
 
 def smoke() -> None:
@@ -357,16 +389,23 @@ def smoke() -> None:
         current = json.load(response)
         if current.get("user", {}).get("email") != LOCAL_ADMIN_EMAIL:
             raise RuntimeError("Sessao do navegador nao persistiu.")
-    if os.environ["LOCAL_MODE"] == "demo":
-        for path in ("/api/analyze", "/api/upload", "/api/auth/register"):
-            try:
-                client.open(urllib.request.Request(base + path, data=b"{}", headers={"Content-Type": "application/json"}), timeout=10)
-            except urllib.error.HTTPError as exc:
-                if exc.code == 503:
-                    continue
-                raise
-            raise RuntimeError(f"Operacao deveria estar bloqueada no modo demo: {path}")
-    print("Verificacao concluida: interface, login e sessao funcionando.")
+    # Verify the real Hub with a read-only call, never print its response.
+    hub = os.environ.get("MARKETING_HUB_BASE_URL", "").rstrip("/")
+    key = os.environ.get("MARKETING_HUB_API_KEY", "")
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+    hub_client = urllib.request.build_opener(NoRedirect())
+    try:
+        with hub_client.open(urllib.request.Request(hub + "/api/customers",
+                                                   headers={"X-API-Key": key}), timeout=30) as response:
+            if response.status != 200:
+                raise RuntimeError("O Hub nao confirmou a consulta autenticada.")
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Consulta autenticada ao Hub recusada (HTTP {exc.code}).") from None
+    except (urllib.error.URLError, TimeoutError):
+        raise RuntimeError("Nao foi possivel conectar ao Hub com HTTPS verificado.") from None
+    print("Verificacao concluida: interface, login, sessao e conexao autenticada ao Hub funcionando.")
 
 
 def main() -> int:
@@ -374,18 +413,22 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     config = commands.add_parser("configure")
     config.add_argument("--root", type=Path, default=ROOT)
-    config.add_argument("--mode", choices=("demo", "connected"))
     config.add_argument("--port", type=int)
     config.add_argument("--api-port", type=int)
     config.add_argument("--host-root", help="Pasta absoluta no computador, fora do container.")
     config.add_argument("--host-platform", choices=("macos", "linux", "windows"))
+    import_config = commands.add_parser("import-secret")
+    import_config.add_argument("--root", type=Path, default=ROOT)
+    import_config.add_argument("--require-complete", action="store_true")
     commands.add_parser("seed")
     commands.add_parser("serve")
     commands.add_parser("smoke")
     args = parser.parse_args()
     try:
         if args.command == "configure":
-            configure(args.root.resolve(), args.mode, args.port, args.api_port, args.host_root, args.host_platform)
+            configure(args.root.resolve(), args.port, args.api_port, args.host_root, args.host_platform)
+        elif args.command == "import-secret":
+            import_secret(args.root.resolve(), sys.stdin.read(1024 * 1024), args.require_complete)
         elif args.command == "seed":
             asyncio.run(seed_database())
         elif args.command == "serve":

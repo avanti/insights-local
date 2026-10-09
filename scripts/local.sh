@@ -11,7 +11,6 @@ if [ "$(basename "$INSIGHTS_SCRIPT_DIR")" = scripts ]; then
 else
   INSIGHTS_ROOT="$PWD/insights-local"
 fi
-INSIGHTS_MODE=""
 INSIGHTS_PORT=""
 INSIGHTS_API_PORT=""
 INSIGHTS_NO_BROWSER=false
@@ -23,12 +22,11 @@ usage() {
   cat <<'USAGE'
 Avanti Insights local
 Uso: bash scripts/local.sh <setup|start|stop|status|doctor|codex|help> [opcoes]
-  --root DIRETORIO       Pasta do instalador (util para o script avulso).
-  --mode demo|connected  Modo inicial demo; execucoes seguintes preservam o modo.
+  --root DIRETORIO       Pasta do repositorio clonado.
   --port NUMERO          Porta da interface (padrao 3000).
   --api-port NUMERO      Porta da API (padrao 8000).
   --no-browser          Nao abrir o navegador.
-  --non-interactive     Nao iniciar login interativo no GitHub.
+  --non-interactive     Nao iniciar logins ou confirmacoes interativas.
   --project frontend|backend|all  Pasta a abrir com codex (padrao all).
 setup instala dependencias ausentes, clona, configura e inicia.
 start/stop/status/doctor/codex nao instalam software.
@@ -39,11 +37,10 @@ USAGE
 fail() { printf '%s\n' "$*" >&2; exit 2; }
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --root|--mode|--port|--api-port|--project)
+    --root|--port|--api-port|--project)
       [ "$#" -ge 2 ] || fail "Falta o valor de $1."
       case "$1" in
         --root) INSIGHTS_ROOT="$2";;
-        --mode) INSIGHTS_MODE="$2";;
         --port) INSIGHTS_PORT="$2";;
         --api-port) INSIGHTS_API_PORT="$2";;
         --project) INSIGHTS_PROJECT="$2";;
@@ -55,7 +52,6 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 case "$INSIGHTS_COMMAND" in setup|start|stop|status|doctor|codex|help|--help|-h) ;; *) fail "Comando desconhecido: $INSIGHTS_COMMAND";; esac
-case "$INSIGHTS_MODE" in ""|demo|connected) ;; *) fail "Modo deve ser demo ou connected.";; esac
 case "$INSIGHTS_PROJECT" in all|frontend|backend) ;; *) fail "Projeto deve ser frontend, backend ou all.";; esac
 if [ "$INSIGHTS_COMMAND" != codex ] && [ "$INSIGHTS_PROJECT" != all ]; then
   fail "Use codex para selecionar um projeto."
@@ -70,10 +66,26 @@ for INSIGHTS_PORT_VALUE in "$INSIGHTS_PORT" "$INSIGHTS_API_PORT"; do
   fi
 done
 if [ "$INSIGHTS_COMMAND" = help ] || [ "$INSIGHTS_COMMAND" = --help ] || [ "$INSIGHTS_COMMAND" = -h ]; then usage; exit 0; fi
-if [ "$INSIGHTS_COMMAND" != setup ] && { [ -n "$INSIGHTS_MODE" ] || [ -n "$INSIGHTS_PORT" ] || [ -n "$INSIGHTS_API_PORT" ]; }; then
-  fail "Use setup para alterar modo ou portas."
+if [ "$INSIGHTS_COMMAND" != setup ] && { [ -n "$INSIGHTS_PORT" ] || [ -n "$INSIGHTS_API_PORT" ]; }; then
+  fail "Use setup para alterar portas."
 fi
 export PATH="$HOME/.local/bin:$HOME/.docker/bin:/Applications/Docker.app/Contents/Resources/bin:$PATH"
+
+progress() {
+  INSIGHTS_STAGE="$1"
+  mkdir -p "$INSIGHTS_ROOT/.local"
+  printf 'Etapa: %s\nPasta: %s\n' "$INSIGHTS_STAGE" "$INSIGHTS_ROOT" > "$INSIGHTS_ROOT/.local/setup-progress.txt"
+  printf '%s\n' "$INSIGHTS_STAGE"
+}
+
+setup_exit() {
+  local code="$?"
+  if [ "$code" -ne 0 ]; then
+    printf 'Etapa: %s\nPasta: %s\nResultado: interrompido (codigo %s)\n' \
+      "$INSIGHTS_STAGE" "$INSIGHTS_ROOT" "$code" > "$INSIGHTS_ROOT/.local/setup-progress.txt" || true
+    printf '%s\n' "O Codex pode retomar na mesma pasta. A etapa foi registrada em .local/setup-progress.txt." >&2
+  fi
+}
 
 open_codex() {
   INSIGHTS_CODEX_LINKS=()
@@ -149,54 +161,6 @@ install_linux() {
   fi
 }
 
-install_macos() {
-  if ! git --version >/dev/null 2>&1; then
-    xcode-select --install || true
-    fail "Conclua a instalacao das ferramentas Apple na janela aberta e execute setup novamente."
-  fi
-  if ! command -v gh >/dev/null; then
-    INSIGHTS_TMP="$(mktemp -d)"
-    INSIGHTS_ARCH="$(uname -m)"
-    case "$INSIGHTS_ARCH" in arm64) ;; x86_64) INSIGHTS_ARCH=amd64;; *) fail "Arquitetura macOS nao suportada.";; esac
-    INSIGHTS_ASSET="gh_2.102.0_macOS_$INSIGHTS_ARCH.zip"
-    curl --fail --silent --show-error --location "https://github.com/cli/cli/releases/download/v2.102.0/$INSIGHTS_ASSET" -o "$INSIGHTS_TMP/$INSIGHTS_ASSET"
-    curl --fail --silent --show-error --location https://github.com/cli/cli/releases/download/v2.102.0/gh_2.102.0_checksums.txt -o "$INSIGHTS_TMP/checksums.txt"
-    INSIGHTS_EXPECTED="$(awk -v asset="$INSIGHTS_ASSET" '$2 == asset {print $1}' "$INSIGHTS_TMP/checksums.txt")"
-    [ -n "$INSIGHTS_EXPECTED" ] || fail "Checksum do GitHub CLI nao encontrado."
-    INSIGHTS_ACTUAL="$(shasum -a 256 "$INSIGHTS_TMP/$INSIGHTS_ASSET" | awk '{print $1}')"
-    [ "$INSIGHTS_EXPECTED" = "$INSIGHTS_ACTUAL" ] || fail "Download do GitHub CLI nao passou na verificacao."
-    unzip -q "$INSIGHTS_TMP/$INSIGHTS_ASSET" -d "$INSIGHTS_TMP/unpacked"
-    mkdir -p "$HOME/.local/bin"
-    cp "$INSIGHTS_TMP/unpacked/gh_2.102.0_macOS_$INSIGHTS_ARCH/bin/gh" "$HOME/.local/bin/gh"
-    chmod 755 "$HOME/.local/bin/gh"
-    rm -rf "$INSIGHTS_TMP"
-  fi
-  if [ ! -d /Applications/Docker.app ]; then
-    INSIGHTS_TMP="$(mktemp -d)"
-    INSIGHTS_ARCH="$(uname -m)"
-    case "$INSIGHTS_ARCH" in arm64) ;; x86_64) INSIGHTS_ARCH=amd64;; *) fail "Arquitetura macOS nao suportada.";; esac
-    curl --fail --silent --show-error --location "https://desktop.docker.com/mac/main/$INSIGHTS_ARCH/Docker.dmg" -o "$INSIGHTS_TMP/Docker.dmg"
-    INSIGHTS_MOUNT="$INSIGHTS_TMP/mounted"
-    hdiutil attach "$INSIGHTS_TMP/Docker.dmg" -nobrowse -mountpoint "$INSIGHTS_MOUNT"
-    if ! admin "$INSIGHTS_MOUNT/Docker.app/Contents/MacOS/install"; then
-      hdiutil detach "$INSIGHTS_MOUNT" || true
-      fail "Instalacao do Docker interrompida; execute setup novamente."
-    fi
-    hdiutil detach "$INSIGHTS_MOUNT"
-    rm -rf "$INSIGHTS_TMP"
-  fi
-  if ! docker info >/dev/null 2>&1; then
-    open -a Docker
-    printf '%s\n' "Conclua os termos e a configuracao inicial na janela do Docker."
-    INSIGHTS_ATTEMPT=0
-    until docker info >/dev/null 2>&1; do
-      INSIGHTS_ATTEMPT=$((INSIGHTS_ATTEMPT + 1))
-      [ "$INSIGHTS_ATTEMPT" -lt 60 ] || fail "Docker ainda nao esta pronto. Conclua a janela e execute setup novamente."
-      sleep 5
-    done
-  fi
-}
-
 select_docker() {
   command -v docker >/dev/null || fail "Docker ausente. Execute setup."
   INSIGHTS_DOCKER=(docker)
@@ -215,15 +179,11 @@ select_docker() {
   "${INSIGHTS_DOCKER[@]}" compose version >/dev/null 2>&1 || fail "Docker Compose ausente. Execute setup."
 }
 
-ensure_bundle() {
-  mkdir -p "$INSIGHTS_ROOT"
-  INSIGHTS_ROOT="$(cd "$INSIGHTS_ROOT" && pwd)"
-  if [ -f "$INSIGHTS_ROOT/scripts/bootstrap_local.py" ]; then return; fi
-  INSIGHTS_TMP="$(mktemp -d)"
-  curl --fail --silent --show-error --location https://github.com/avanti/insights-local/archive/refs/tags/v0.1.1.zip -o "$INSIGHTS_TMP/starter.zip"
-  unzip -q "$INSIGHTS_TMP/starter.zip" -d "$INSIGHTS_TMP/unpacked"
-  cp -R "$INSIGHTS_TMP/unpacked/insights-local-0.1.1/." "$INSIGHTS_ROOT/"
-  rm -rf "$INSIGHTS_TMP"
+ensure_checkout() {
+  local file
+  for file in scripts/bootstrap_local.py scripts/macos.sh scripts/macos-askpass.sh scripts/aws.sh scripts/aws-cli-public-key.asc compose.local.yml templates/nginx.conf sources.lock; do
+    [ -f "$INSIGHTS_ROOT/$file" ] || fail "Repositorio incompleto: falta $file. O Codex deve usar o clone completo do insights-local, preservando esta pasta."
+  done
 }
 
 value() { sed -n "s/^$1=//p" "$2" | sed "s/^'//;s/'$//"; }
@@ -242,33 +202,36 @@ checkout_source() {
     git init -q "$INSIGHTS_DEST"
     git -C "$INSIGHTS_DEST" remote add origin "https://github.com/$INSIGHTS_REPOSITORY.git"
   fi
-  [ -z "$(git -C "$INSIGHTS_DEST" status --porcelain)" ] || fail "Existem alteracoes em $INSIGHTS_DEST; preserve-as antes de continuar."
   if ! git -C "$INSIGHTS_DEST" rev-parse --verify HEAD >/dev/null 2>&1; then
     [ "$(git -C "$INSIGHTS_DEST" remote get-url origin)" = "https://github.com/$INSIGHTS_REPOSITORY.git" ] \
       || fail "A origem do checkout incompleto difere de sources.lock."
     if ! gh auth status --hostname github.com >/dev/null 2>&1; then
       if [ "$INSIGHTS_NONINTERACTIVE" = true ] || [ -n "${CI:-}" ]; then
-        fail "Autentique o GitHub CLI com gh auth login e autorize acesso aos repositorios Avanti."
+        fail "Falta conectar sua conta GitHub. O Codex deve iniciar o login permitido e orientar a confirmacao no navegador."
       fi
-      gh auth login --hostname github.com --git-protocol https --web
+      printf '%s\n' "Conecte sua conta GitHub no navegador e autorize o acesso aos projetos Avanti. Vou continuar depois da confirmacao."
+      gh auth login --hostname github.com --git-protocol https --web \
+        || fail "A conexao com o GitHub nao terminou. O Codex deve identificar qual confirmacao falta antes de continuar."
     fi
     private_git -C "$INSIGHTS_DEST" fetch --depth 1 origin "$INSIGHTS_REF"
     private_git -C "$INSIGHTS_DEST" checkout --detach -q "$INSIGHTS_REF"
   fi
-  [ "$(git -C "$INSIGHTS_DEST" rev-parse HEAD)" = "$INSIGHTS_REF" ] || fail "Checkout $INSIGHTS_NAME difere de sources.lock. Nenhuma alteracao foi sobrescrita."
+  [ "$(git -C "$INSIGHTS_DEST" remote get-url origin)" = "https://github.com/$INSIGHTS_REPOSITORY.git" ] \
+    || fail "O checkout existente de $INSIGHTS_NAME aponta para outro repositorio. Nenhum arquivo foi sobrescrito."
+  printf '%s\n' "Projeto $INSIGHTS_NAME pronto. Codigo e alteracoes locais preservados."
 }
 
 compose() {
   [ -f "$INSIGHTS_ROOT/.local/compose.env" ] || fail "Configuracao ausente. Execute setup."
-  INSIGHTS_PROFILES=(--profile demo)
-  if [ "$(value LOCAL_MODE "$INSIGHTS_ROOT/.local/compose.env")" = connected ]; then INSIGHTS_PROFILES=(--profile connected); fi
   COMPOSE_PROFILES="" "${INSIGHTS_DOCKER[@]}" compose \
     --project-name "${INSIGHTS_PROJECT_NAME:-insights-local}" \
     --project-directory "$INSIGHTS_ROOT" --env-file "$INSIGHTS_ROOT/.local/compose.env" \
-    -f "$INSIGHTS_ROOT/compose.local.yml" "${INSIGHTS_PROFILES[@]}" "$@"
+    -f "$INSIGHTS_ROOT/compose.local.yml" "$@"
 }
 
 start_stack() {
+  [ "$(value LOCAL_MODE "$INSIGHTS_ROOT/.local/compose.env")" = connected ] \
+    || fail "Instalacao anterior ainda usa demonstracao. Execute setup para preparar as integracoes reais."
   compose config --quiet
   compose up -d --build --wait --wait-timeout 600 --remove-orphans
   compose exec -T api python /opt/insights-local/scripts/bootstrap_local.py smoke
@@ -278,7 +241,7 @@ start_stack() {
   printf '%s\n' "Atalhos para o Codex: $INSIGHTS_ROOT/.local/codex-projects.html"
   if [ "$INSIGHTS_NO_BROWSER" = false ]; then
     case "$(uname -s)" in
-      Darwin) open "http://localhost:$INSIGHTS_WEB_PORT";;
+      Darwin) open "http://localhost:$INSIGHTS_WEB_PORT" || printf '%s\n' "A interface esta pronta; abra o endereco acima no navegador.";;
       Linux) if command -v xdg-open >/dev/null; then xdg-open "http://localhost:$INSIGHTS_WEB_PORT" >/dev/null 2>&1 || true; fi;;
     esac
   fi
@@ -286,22 +249,42 @@ start_stack() {
 
 case "$INSIGHTS_COMMAND" in
   setup)
-    case "$(uname -s)" in Darwin) install_macos;; Linux) install_linux;; *) fail "Use local.ps1 no Windows.";; esac
+    mkdir -p "$INSIGHTS_ROOT"
+    INSIGHTS_ROOT="$(cd "$INSIGHTS_ROOT" && pwd)"
+    progress "Preparando as ferramentas do computador."
+    trap setup_exit EXIT
+    ensure_checkout
+    case "$(uname -s)" in
+      Darwin)
+        # shellcheck source=scripts/macos.sh
+        . "$INSIGHTS_ROOT/scripts/macos.sh"
+        install_macos;;
+      Linux) install_linux;;
+      *) fail "Use local.ps1 no Windows.";;
+    esac
     select_docker
-    ensure_bundle
+    # shellcheck source=scripts/aws.sh
+    . "$INSIGHTS_ROOT/scripts/aws.sh"
+    install_aws
+    progress "Conectando o GitHub e preparando os projetos."
     checkout_source backend BACKEND
     checkout_source frontend FRONTEND
-    if [ -f "$INSIGHTS_ROOT/.local/compose.env" ]; then compose down --remove-orphans; fi
+    progress "Conectando a AWS e preparando as integracoes."
+    ensure_aws_session
+    fetch_integrations
+    progress "Configurando o ambiente local."
     INSIGHTS_HOST_PLATFORM=linux
     if [ "$(uname -s)" = Darwin ]; then INSIGHTS_HOST_PLATFORM=macos; fi
     INSIGHTS_CONFIG_ARGS=(configure --host-root "$INSIGHTS_ROOT" --host-platform "$INSIGHTS_HOST_PLATFORM")
-    if [ -n "$INSIGHTS_MODE" ]; then INSIGHTS_CONFIG_ARGS+=(--mode "$INSIGHTS_MODE"); fi
     if [ -n "$INSIGHTS_PORT" ]; then INSIGHTS_CONFIG_ARGS+=(--port "$INSIGHTS_PORT"); fi
     if [ -n "$INSIGHTS_API_PORT" ]; then INSIGHTS_CONFIG_ARGS+=(--api-port "$INSIGHTS_API_PORT"); fi
     "${INSIGHTS_DOCKER[@]}" run --rm --network none --user "$(id -u):$(id -g)" \
       --mount "type=bind,source=$INSIGHTS_ROOT,target=/bootstrap" \
       python:3.11-slim python /bootstrap/scripts/bootstrap_local.py "${INSIGHTS_CONFIG_ARGS[@]}"
-    start_stack;;
+    if [ -f "$INSIGHTS_ROOT/.local/compose.env" ]; then compose down --remove-orphans; fi
+    progress "Iniciando o Avanti Insights. O primeiro inicio pode levar varios minutos."
+    start_stack
+    progress "Avanti Insights pronto. Interface, login, workers e Hub verificados.";;
   start) select_docker; start_stack;;
   stop) select_docker; compose down --remove-orphans;;
   codex) open_codex;;
@@ -312,13 +295,19 @@ case "$INSIGHTS_COMMAND" in
       "Interface: http://localhost:$(value LOCAL_WEB_PORT "$INSIGHTS_ROOT/.local/compose.env")";;
   doctor)
     printf '%s\n' "Sistema: $(uname -s) $(uname -m)" "Pasta: $INSIGHTS_ROOT"
-    for INSIGHTS_TOOL in git gh docker; do command -v "$INSIGHTS_TOOL" >/dev/null || fail "Dependencia ausente: $INSIGHTS_TOOL. Execute setup."; done
+    for INSIGHTS_TOOL in git gh docker aws; do command -v "$INSIGHTS_TOOL" >/dev/null || fail "Dependencia ausente: $INSIGHTS_TOOL. Execute setup."; done
     select_docker
     "${INSIGHTS_DOCKER[@]}" compose version
     if [ -f "$INSIGHTS_ROOT/.local/compose.env" ]; then
       compose config --quiet
       compose ps
       compose exec -T api python /opt/insights-local/scripts/bootstrap_local.py smoke
+      for INSIGHTS_SERVICE in worker playwright_worker; do
+        # HOSTNAME is expanded by the shell inside the worker container.
+        # shellcheck disable=SC2016
+        compose exec -T "$INSIGHTS_SERVICE" sh -c 'celery -A app.core.celery inspect ping -d "celery@$HOSTNAME" --timeout=10'
+      done
+      compose exec -T scheduler python -c 'print("Scheduler local em execucao.")'
     else
       fail "Dependencias prontas, mas falta configurar os projetos. Execute setup."
     fi;;

@@ -22,6 +22,9 @@ jobs:
         shell: bash
         run: |
           bash -n scripts/local.sh
+          bash -n scripts/macos.sh
+          bash -n scripts/aws.sh
+          sh -n scripts/macos-askpass.sh
           bash scripts/local.sh help
       - name: PowerShell syntax and command contracts
         shell: pwsh

@@ -10,4 +10,4 @@ COPY sources/frontend/package.json sources/frontend/package-lock.json ./
 RUN npm ci
 COPY sources/frontend/ ./
 EXPOSE 3000
-CMD ["npm", "run", "dev", "--", "--hostname", "0.0.0.0"]
+CMD ["npm", "run", "dev:webpack", "--", "--hostname", "0.0.0.0"]

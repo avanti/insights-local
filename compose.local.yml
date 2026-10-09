@@ -8,9 +8,14 @@ x-backend: &backend
     - ./.local/backend.env
   environment:
     PYTHONPATH: /app
+    WATCHFILES_FORCE_POLLING: "true"
   volumes:
     - ./scripts:/opt/insights-local/scripts:ro
     - local_temp:/tmp
+    - ./sources/backend/app:/app/app
+    - ./sources/backend/scripts:/app/scripts
+  tmpfs:
+    - /run/ga4-credentials:rw,noexec,nosuid,nodev,size=64k,mode=0700
   networks:
     - local
 
@@ -71,6 +76,13 @@ services:
       dockerfile: docker/frontend.Dockerfile
     env_file:
       - ./.local/frontend.env
+    environment:
+      # Docker Desktop may not forward native filesystem events to Linux containers.
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - ./sources/frontend:/app
+      - frontend_node_modules:/app/node_modules
+      - frontend_next:/app/.next
     depends_on:
       api:
         condition: service_healthy
@@ -105,23 +117,32 @@ services:
 
   worker:
     <<: *backend
-    profiles: [connected]
     command: ["celery", "-A", "app.core.celery", "worker", "--loglevel=info", "-Q", "celery", "--concurrency=2"]
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d celery@$$HOSTNAME --timeout=10 >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 15s
+      start_period: 60s
+      retries: 10
     depends_on:
       api:
         condition: service_healthy
 
   playwright_worker:
     <<: *backend
-    profiles: [connected]
     command: ["celery", "-A", "app.core.celery", "worker", "--loglevel=info", "-Q", "playwright", "--concurrency=1", "--prefetch-multiplier=1", "--max-tasks-per-child=1"]
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d celery@$$HOSTNAME --timeout=10 >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 15s
+      start_period: 60s
+      retries: 10
     depends_on:
       api:
         condition: service_healthy
 
   scheduler:
     <<: *backend
-    profiles: [connected]
     command: ["python", "-m", "app.scheduler"]
     depends_on:
       api:
@@ -129,9 +150,10 @@ services:
 
 networks:
   local:
-    internal: ${LOCAL_NETWORK_INTERNAL}
   ingress:
 
 volumes:
   local_postgres:
   local_temp:
+  frontend_node_modules:
+  frontend_next:

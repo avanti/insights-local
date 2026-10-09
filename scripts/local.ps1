@@ -5,8 +5,6 @@ param(
     [ValidateSet('setup', 'start', 'stop', 'status', 'doctor', 'codex', 'help')]
     [string]$Command = 'help',
     [string]$Root,
-    [ValidateSet('demo', 'connected')]
-    [string]$Mode,
     [ValidateRange(1024, 65535)]
     [int]$Port,
     [ValidateRange(1024, 65535)]
@@ -30,7 +28,7 @@ $Root = [IO.Path]::GetFullPath($Root)
 function Show-Usage {
     Write-Host 'Avanti Insights local'
     Write-Host '.\scripts\local.ps1 <setup|start|stop|status|doctor|codex|help>'
-    Write-Host 'Opcoes: -Root PASTA -Mode demo|connected -Port 3000 -ApiPort 8000 -NoBrowser -NonInteractive'
+    Write-Host 'Opcoes: -Root PASTA -Port 3000 -ApiPort 8000 -NoBrowser -NonInteractive'
     Write-Host 'setup instala dependencias ausentes, clona, configura e inicia.'
     Write-Host 'Os outros comandos nao instalam software.'
     Write-Host 'codex -Project frontend|backend|all abre as pastas no Codex (padrao all).'
@@ -55,8 +53,14 @@ function Open-Codex {
 }
 
 function Invoke-Native {
-    param([string]$Executable, [string[]]$Arguments)
-    & $Executable @Arguments
+    param([string]$Executable, [string[]]$Arguments, [string]$InputText)
+    if ($PSBoundParameters.ContainsKey('InputText')) {
+        $savedEncoding = $OutputEncoding
+        try {
+            $OutputEncoding = New-Object Text.UTF8Encoding($false)
+            $InputText | & $Executable @Arguments
+        } finally { $OutputEncoding = $savedEncoding }
+    } else { & $Executable @Arguments }
     if ($LASTEXITCODE -ne 0) { throw "Falha em $Executable (codigo $LASTEXITCODE)." }
 }
 
@@ -66,15 +70,24 @@ function Refresh-Path {
     $env:Path = "$machinePath;$userPath;$env:Path"
 }
 
+function Write-SetupProgress {
+    param([string]$Stage)
+    $script:SetupStage = $Stage
+    $local = Join-Path $Root '.local'
+    New-Item -ItemType Directory -Force -Path $local | Out-Null
+    [IO.File]::WriteAllText((Join-Path $local 'setup-progress.txt'), "Etapa: $Stage`nPasta: $Root`n")
+    Write-Host $Stage
+}
+
 function Install-Package {
-    param([string]$Id)
+    param([string]$Id, [string]$Operation = 'install')
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         throw 'Instale ou atualize o App Installer da Microsoft Store para disponibilizar winget, e execute setup novamente.'
     }
     # Package prompts remain visible; Docker terms are completed in its own app.
-    & winget install --exact --id $Id --source winget --accept-source-agreements
+    & winget $Operation --exact --id $Id --source winget --accept-source-agreements
     if ($LASTEXITCODE -eq 3010) {
-        throw 'A instalacao requer reinicializacao. Reinicie o computador e execute setup novamente.'
+        throw 'A instalacao requer reinicializacao. Reinicie o computador e diga continuar ao Codex para retomar.'
     }
     if ($LASTEXITCODE -ne 0) { throw "Instalacao de $Id interrompida (codigo $LASTEXITCODE)." }
     Refresh-Path
@@ -96,6 +109,7 @@ function Install-Dependencies {
     }
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Install-Package 'Git.Git' }
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { Install-Package 'GitHub.cli' }
+    Install-Aws
     $wslReady = $false
     if (Get-Command wsl.exe -ErrorAction SilentlyContinue) {
         $savedPreference = $ErrorActionPreference
@@ -113,7 +127,7 @@ function Install-Dependencies {
         if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) {
             throw "Configuracao do WSL interrompida (codigo $($process.ExitCode))."
         }
-        throw 'Conclua a instalacao do WSL, reinicie o Windows se solicitado e execute setup novamente.'
+        throw 'Conclua a preparacao do Windows e reinicie se solicitado. Depois diga continuar ao Codex para retomar na mesma pasta.'
     }
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { Install-Package 'Docker.DockerDesktop' }
     if (-not (Test-Docker $script:DockerContext)) {
@@ -122,13 +136,90 @@ function Install-Dependencies {
             $desktop = Join-Path $env:LOCALAPPDATA 'Programs\DockerDesktop\Docker Desktop.exe'
         }
         if (Test-Path $desktop) { Start-Process $desktop }
-        Write-Host 'Conclua os termos e a configuracao inicial na janela do Docker Desktop.'
+        Write-Host 'Na janela do Docker, aceite os termos se concordar. Vou aguardar a inicializacao e continuar.'
         for ($attempt = 0; $attempt -lt 60; $attempt++) {
             if (Test-Docker $script:DockerContext) { return }
             Start-Sleep -Seconds 5
         }
-        throw 'Docker ainda nao esta pronto. Conclua sua janela e execute setup novamente.'
+        throw 'Conclua a janela do Docker e diga continuar ao Codex para retomar.'
     }
+}
+
+function Test-AwsVersion {
+    if (-not (Get-Command aws -ErrorAction SilentlyContinue)) { return $false }
+    $saved = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { $versionText = (& aws --version 2>&1 | Out-String) } finally { $ErrorActionPreference = $saved }
+    return ($versionText -match 'aws-cli/(2\.(\d+)\.\d+)' -and [int]$Matches[2] -ge 32)
+}
+
+function Install-Aws {
+    if (Test-AwsVersion) { return }
+    Write-Host 'Preparando o acesso a AWS para entrar pelo navegador.'
+    if (Get-Command aws -ErrorAction SilentlyContinue) { Install-Package 'Amazon.AWSCLI' 'upgrade' }
+    else { Install-Package 'Amazon.AWSCLI' }
+    if (-not (Test-AwsVersion)) { throw 'AWS CLI 2.32.0 ou posterior ainda nao esta disponivel.' }
+}
+
+function Get-AwsArguments {
+    $profile = $env:INSIGHTS_AWS_PROFILE
+    if (-not $profile) { $profile = 'avanti-insights-local' }
+    $region = $env:INSIGHTS_AWS_REGION
+    if (-not $region) { $region = 'us-east-1' }
+    return @('--profile', $profile, '--region', $region)
+}
+
+function Test-AwsSession {
+    $saved = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $arguments = (Get-AwsArguments) + @('sts', 'get-caller-identity', '--cli-connect-timeout', '10', '--cli-read-timeout', '15')
+        & aws @arguments *> $null
+        return $LASTEXITCODE -eq 0
+    } finally { $ErrorActionPreference = $saved }
+}
+
+function Ensure-AwsSession {
+    $env:AWS_PAGER = ''
+    $env:AWS_CLI_AUTO_PROMPT = 'off'
+    if (Test-AwsSession) { return }
+    if ($NonInteractive -or $env:CI) { throw 'Falta entrar na AWS. Retome setup com o Codex em modo interativo.' }
+    Write-Host 'Entre na conta AWS da Avanti na janela do navegador, confirme o MFA e autorize o acesso local. A senha fica somente na AWS.'
+    $arguments = Get-AwsArguments
+    $method = $env:INSIGHTS_AWS_LOGIN_METHOD
+    if (-not $method) { $method = 'console' }
+    if ($method -eq 'console') {
+        $region = $env:INSIGHTS_AWS_REGION
+        if (-not $region) { $region = 'us-east-1' }
+        Invoke-Native 'aws' ($arguments + @('configure', 'set', 'region', $region))
+        Invoke-Native 'aws' ($arguments + @('login'))
+    } elseif ($method -eq 'sso') {
+        Invoke-Native 'aws' ($arguments + @('sso', 'login'))
+    } else { throw 'INSIGHTS_AWS_LOGIN_METHOD deve ser console ou sso.' }
+    if (-not (Test-AwsSession)) { throw 'A sessao AWS nao ficou disponivel. Confira a autenticacao no navegador.' }
+}
+
+function Protect-LocalFiles {
+    $local = Join-Path $Root '.local'
+    New-Item -ItemType Directory -Force $local | Out-Null
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    Invoke-Native 'icacls.exe' @($local, '/inheritance:r', '/grant:r', "${identity}:(OI)(CI)F",
+        '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F', '/T', '/Q')
+}
+
+function Fetch-Integrations {
+    $secretId = $env:INSIGHTS_SECRET_ID
+    if (-not $secretId) { $secretId = 'synapse/review-app/env' }
+    $arguments = (Get-AwsArguments) + @('secretsmanager', 'get-secret-value', '--secret-id', $secretId,
+        '--query', 'SecretString', '--output', 'json', '--cli-connect-timeout', '10', '--cli-read-timeout', '30')
+    # Keep the response in memory; never echo it or write raw JSON to disk.
+    $secretJson = & aws @arguments
+    if ($LASTEXITCODE -ne 0) { throw 'Nao foi possivel obter as integracoes. Confira a permissao de leitura do segredo AWS.' }
+    try {
+        Invoke-Docker @('run', '--rm', '-i', '--network', 'none', '--mount', "type=bind,source=$Root,target=/bootstrap",
+            'python:3.11-slim', 'python', '/bootstrap/scripts/bootstrap_local.py', 'import-secret') -InputText ($secretJson -join "`n")
+    } finally { $secretJson = $null }
+    Protect-LocalFiles
 }
 
 function Select-Docker {
@@ -144,26 +235,19 @@ function Select-Docker {
 }
 
 function Invoke-Docker {
-    param([Parameter(Position = 0)][string[]]$DockerArguments)
+    param([Parameter(Position = 0)][string[]]$DockerArguments, [string]$InputText)
     $prefix = @()
     if ($script:DockerContext) { $prefix += @('--context', $script:DockerContext) }
-    Invoke-Native 'docker' ($prefix + $DockerArguments)
+    if ($PSBoundParameters.ContainsKey('InputText')) {
+        Invoke-Native 'docker' ($prefix + $DockerArguments) -InputText $InputText
+    } else { Invoke-Native 'docker' ($prefix + $DockerArguments) }
 }
 
-function Ensure-Bundle {
-    New-Item -ItemType Directory -Force -Path $Root | Out-Null
-    if (Test-Path (Join-Path $Root 'scripts\bootstrap_local.py')) { return }
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    $temp = Join-Path ([IO.Path]::GetTempPath()) ('insights-local-' + [Guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $temp | Out-Null
-    try {
-        $zip = Join-Path $temp 'starter.zip'
-        Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/avanti/insights-local/archive/refs/tags/v0.1.1.zip' -OutFile $zip
-        Expand-Archive -Path $zip -DestinationPath $temp
-        Get-ChildItem -Force (Join-Path $temp 'insights-local-0.1.1') |
-            Copy-Item -Destination $Root -Recurse -Force
-    } finally {
-        Remove-Item -Recurse -Force $temp
+function Ensure-Checkout {
+    foreach ($file in @('scripts/bootstrap_local.py', 'scripts/macos.sh', 'scripts/macos-askpass.sh', 'scripts/aws.sh', 'scripts/aws-cli-public-key.asc', 'templates/nginx.conf', 'compose.local.yml', 'sources.lock')) {
+        if (-not (Test-Path (Join-Path $Root $file) -PathType Leaf)) {
+            throw "Repositorio incompleto: falta $file. O Codex deve usar o clone completo do insights-local, preservando esta pasta."
+        }
     }
 }
 
@@ -192,8 +276,6 @@ function Ensure-Source {
         Invoke-Native 'git' @('init', '-q', $destination)
         Invoke-Native 'git' @('-C', $destination, 'remote', 'add', 'origin', "https://github.com/$repository.git")
     }
-    $dirty = & git -C $destination status --porcelain
-    if ($LASTEXITCODE -ne 0 -or $dirty) { throw "Existem alteracoes em $destination. Nenhum arquivo foi sobrescrito." }
     $savedPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     & git -C $destination rev-parse --verify HEAD *> $null
@@ -210,15 +292,19 @@ function Ensure-Source {
         $authenticated = $LASTEXITCODE -eq 0
         $ErrorActionPreference = $savedPreference
         if (-not $authenticated) {
-            if ($NonInteractive -or $env:CI) { throw 'Execute gh auth login e autorize acesso aos repositorios Avanti.' }
+            if ($NonInteractive -or $env:CI) { throw 'Falta conectar sua conta GitHub. O Codex deve iniciar o login permitido e orientar a confirmacao no navegador.' }
+            Write-Host 'Conecte sua conta GitHub no navegador e autorize o acesso aos projetos Avanti. Vou continuar depois da confirmacao.'
             Invoke-Native 'gh' @('auth', 'login', '--hostname', 'github.com', '--git-protocol', 'https', '--web')
         }
         $auth = @('-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential', '-C', $destination)
         Invoke-Native 'git' ($auth + @('fetch', '--depth', '1', 'origin', $revision))
         Invoke-Native 'git' ($auth + @('checkout', '--detach', '-q', $revision))
     }
-    $head = & git -C $destination rev-parse HEAD
-    if ($LASTEXITCODE -ne 0 -or $head -ne $revision) { throw "Checkout $Name difere de sources.lock. Preserve suas alteracoes antes de continuar." }
+    $origin = & git -C $destination remote get-url origin
+    if ($LASTEXITCODE -ne 0 -or $origin -ne "https://github.com/$repository.git") {
+        throw "O checkout existente de $Name aponta para outro repositorio. Nenhum arquivo foi sobrescrito."
+    }
+    Write-Host "Projeto $Name pronto. Codigo e alteracoes locais preservados."
 }
 
 function Invoke-Compose {
@@ -229,11 +315,6 @@ function Invoke-Compose {
     if (-not $projectName) { $projectName = 'insights-local' }
     $composeArgs = @('compose', '--project-name', $projectName, '--project-directory', $Root,
         '--env-file', $config, '-f', (Join-Path $Root 'compose.local.yml'))
-    if ((Get-LiteralValue 'LOCAL_MODE' $config) -eq 'connected') {
-        $composeArgs += @('--profile', 'connected')
-    } else {
-        $composeArgs += @('--profile', 'demo')
-    }
     $savedProfiles = $env:COMPOSE_PROFILES
     try {
         $env:COMPOSE_PROFILES = ''
@@ -242,6 +323,9 @@ function Invoke-Compose {
 }
 
 function Start-Stack {
+    if ((Get-LiteralValue 'LOCAL_MODE' (Join-Path $Root '.local/compose.env')) -ne 'connected') {
+        throw 'Instalacao anterior ainda usa demonstracao. Execute setup para preparar as integracoes reais.'
+    }
     Invoke-Compose @('config', '--quiet')
     Invoke-Compose @('up', '-d', '--build', '--wait', '--wait-timeout', '600', '--remove-orphans')
     Invoke-Compose @('exec', '-T', 'api', 'python', '/opt/insights-local/scripts/bootstrap_local.py', 'smoke')
@@ -256,22 +340,31 @@ function Start-Stack {
 try {
     if ($Command -eq 'help') { Show-Usage; exit 0 }
     if ($Command -ne 'codex' -and $Project -ne 'all') { throw 'Use codex para selecionar um projeto.' }
-    if ($Command -ne 'setup' -and ($Mode -or $Port -or $ApiPort)) { throw 'Use setup para alterar modo ou portas.' }
+    if ($Command -ne 'setup' -and ($Port -or $ApiPort)) { throw 'Use setup para alterar portas.' }
     switch ($Command) {
         'setup' {
+            Write-SetupProgress 'Preparando as ferramentas do computador.'
+            Ensure-Checkout
             Install-Dependencies
             Select-Docker
-            Ensure-Bundle
+            Write-SetupProgress 'Conectando o GitHub e preparando os projetos.'
             Ensure-Source 'backend' 'BACKEND'
             Ensure-Source 'frontend' 'FRONTEND'
-            if (Test-Path (Join-Path $Root '.local\compose.env')) { Invoke-Compose @('down', '--remove-orphans') }
+            Write-SetupProgress 'Conectando a AWS e preparando as integracoes.'
+            Protect-LocalFiles
+            Ensure-AwsSession
+            Fetch-Integrations
+            Write-SetupProgress 'Configurando o ambiente local.'
             $configArgs = @('configure', '--host-root', $Root, '--host-platform', 'windows')
-            if ($Mode) { $configArgs += @('--mode', $Mode) }
             if ($Port) { $configArgs += @('--port', "$Port") }
             if ($ApiPort) { $configArgs += @('--api-port', "$ApiPort") }
             Invoke-Docker (@('run', '--rm', '--network', 'none', '--mount', "type=bind,source=$Root,target=/bootstrap",
                 'python:3.11-slim', 'python', '/bootstrap/scripts/bootstrap_local.py') + $configArgs)
+            Protect-LocalFiles
+            if (Test-Path (Join-Path $Root '.local\compose.env')) { Invoke-Compose @('down', '--remove-orphans') }
+            Write-SetupProgress 'Iniciando o Avanti Insights. O primeiro inicio pode levar varios minutos.'
             Start-Stack
+            Write-SetupProgress 'Avanti Insights pronto. Interface, login, workers e Hub verificados.'
         }
         'start' { Select-Docker; Start-Stack }
         'stop' { Select-Docker; Invoke-Compose @('down', '--remove-orphans') }
@@ -286,17 +379,30 @@ try {
         'doctor' {
             Write-Host ("Sistema: " + [Environment]::OSVersion.VersionString)
             Write-Host "Pasta: $Root"
-            foreach ($tool in @('git', 'gh', 'docker')) {
+            foreach ($tool in @('git', 'gh', 'docker', 'aws')) {
                 if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "Dependencia ausente: $tool. Execute setup." }
             }
             Select-Docker
             Invoke-Compose @('config', '--quiet')
             Invoke-Compose @('ps')
             Invoke-Compose @('exec', '-T', 'api', 'python', '/opt/insights-local/scripts/bootstrap_local.py', 'smoke')
+            foreach ($service in @('worker', 'playwright_worker')) {
+                Invoke-Compose @('exec', '-T', $service, 'sh', '-c', 'celery -A app.core.celery inspect ping -d "celery@$HOSTNAME" --timeout=10')
+            }
+            Invoke-Compose @('exec', '-T', 'scheduler', 'python', '-c', "print('Scheduler local em execucao.')")
         }
     }
     exit 0
 } catch {
-    Write-Host $_.Exception.Message -ForegroundColor Red
+    $setupError = $_.Exception.Message
+    if ($Command -eq 'setup' -and $script:SetupStage) {
+        try {
+            [IO.File]::WriteAllText((Join-Path $Root '.local/setup-progress.txt'), "Etapa: $script:SetupStage`nPasta: $Root`nResultado: interrompido`n")
+            Write-Host 'O Codex pode retomar na mesma pasta. A etapa foi registrada em .local/setup-progress.txt.'
+        } catch {
+            Write-Host 'Nao foi possivel salvar a etapa. O Codex pode retomar usando a mesma pasta.'
+        }
+    }
+    Write-Host $setupError -ForegroundColor Red
     exit 2
 }
