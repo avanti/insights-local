@@ -25,13 +25,14 @@ REQUIRED_INTEGRATIONS = (
     "GA4_CREDENTIALS_PRIVATE_KEY_B64", "GA4_CREDENTIALS_KEY_ID",
     "GA4_CREDENTIALS_SERVICE_TOKEN",
 )
+BACKEND_ENV_RELATIVE_PATH = Path("sources") / "backend" / ".env"
 DEFAULT_MARKETING_HUB_BASE_URL = "https://100.55.149.93.nip.io"
 LOCAL_ADMIN_EMAIL = "admin@example.com"
 
 
 def validate_credentials(values: dict[str, str]) -> dict[str, str]:
     missing = [key for key in REQUIRED_INTEGRATIONS
-               if not values.get(key) or values[key] == "local-demo-disabled"]
+               if not values.get(key) or values[key] in {"...", "local-demo-disabled"}]
     for prefix in ("MERCHANT", "JOBBER"):
         if values.get(f"{prefix}_MCP_ENABLED", "false").lower() in {"true", "1", "yes", "on"}:
             if not values.get(f"{prefix}_MCP_URL"):
@@ -42,41 +43,14 @@ def validate_credentials(values: dict[str, str]) -> dict[str, str]:
                     missing.append("MERCHANT_MCP_AUTH_TOKEN")
     if values.get("GITHUB_MCP_ENABLED", "false").lower() in {"true", "1", "yes", "on"}:
         missing.extend(key for key in ("GITHUB_CREDENTIALS_PRIVATE_KEY_B64", "GITHUB_CREDENTIALS_KEY_ID",
-                                       "GITHUB_CREDENTIALS_SERVICE_TOKEN") if not values.get(key))
+                                       "GITHUB_CREDENTIALS_SERVICE_TOKEN") if not values.get(key) or values[key] == "...")
     if missing:
-        raise ValueError("Credenciais incompletas no segredo AWS ou em .local/integrations.override.env: "
+        raise ValueError("O arquivo sources/backend/.env esta incompleto. Preencha estas variaveis antes de iniciar os servicos: "
                          + ", ".join(sorted(set(missing))))
     hub = urlparse(values.get("MARKETING_HUB_BASE_URL") or DEFAULT_MARKETING_HUB_BASE_URL)
     if hub.scheme != "https" or not hub.hostname or hub.username or hub.password or hub.query or hub.fragment:
         raise ValueError("MARKETING_HUB_BASE_URL deve ser um endereco HTTPS sem credenciais, query ou fragmento.")
     return values
-
-
-def import_secret(root: Path, raw: str, require_complete: bool = False) -> None:
-    """Consume AWS JSON over stdin; never log or save the raw secret response."""
-    if require_complete:
-        marker = "\nINSIGHTS_SECRET_COMPLETE\n"
-        if not raw.endswith(marker):
-            raise ValueError("A consulta AWS nao terminou com sucesso. Configuracao anterior preservada.")
-        raw = raw[:-len(marker)]
-    try:
-        values = json.loads(raw.lstrip("\ufeff"))
-        if isinstance(values, str):
-            values = json.loads(values)
-    except (ValueError, TypeError):
-        raise ValueError("Nao foi possivel ler o segredo AWS como JSON. Nenhum valor foi exibido.") from None
-    if not isinstance(values, dict) or not values:
-        raise ValueError("O segredo AWS deve conter um objeto JSON nao vazio.")
-    for key, value in values.items():
-        if not re.fullmatch(r"[A-Z_][A-Z_0-9]*", key) or not isinstance(value, str):
-            raise ValueError("O segredo deve conter nomes de variaveis validos e valores de texto.")
-        if key == "GOOGLE_SHEETS_PRIVATE_KEY":
-            values[key] = value.replace("\r\n", "\n").replace("\n", "\\n")
-    overrides = read_env(root / ".local" / "integrations.override.env")
-    validate_credentials({**values, **overrides})
-    content = env_text(values)
-    private_write(root / ".local" / "integrations.env", content)
-    print("Credenciais obtidas da AWS e salvas com acesso restrito. Valores nao exibidos.")
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -183,8 +157,19 @@ def configure(root: Path, port: int | None = None, api_port: int | None = None,
     if web_port == backend_port:
         raise ValueError("Front-end e API precisam de portas diferentes.")
 
-    credentials = validate_credentials({**read_env(local / "integrations.env"),
-                                        **read_env(local / "integrations.override.env")})
+    backend_env = root / BACKEND_ENV_RELATIVE_PATH
+    if not backend_env.is_file():
+        raise ValueError(
+            "Antes de iniciar os servicos, crie sources/backend/.env copiando "
+            "sources/backend/.env.example e preenchendo as configuracoes privadas localmente. "
+            "Nao cole chaves ou senhas no chat do Codex. Depois execute setup novamente."
+        )
+    overrides = read_env(local / "integrations.override.env")
+    credentials = validate_credentials({
+        **read_env(backend_env),
+        "MARKETING_HUB_BASE_URL": overrides.get("MARKETING_HUB_BASE_URL") or DEFAULT_MARKETING_HUB_BASE_URL,
+        **overrides,
+    })
 
     lock = read_env(root / "sources.lock")
     for key in ("BACKEND_REF", "FRONTEND_REF"):
@@ -417,9 +402,6 @@ def main() -> int:
     config.add_argument("--api-port", type=int)
     config.add_argument("--host-root", help="Pasta absoluta no computador, fora do container.")
     config.add_argument("--host-platform", choices=("macos", "linux", "windows"))
-    import_config = commands.add_parser("import-secret")
-    import_config.add_argument("--root", type=Path, default=ROOT)
-    import_config.add_argument("--require-complete", action="store_true")
     commands.add_parser("seed")
     commands.add_parser("serve")
     commands.add_parser("smoke")
@@ -427,8 +409,6 @@ def main() -> int:
     try:
         if args.command == "configure":
             configure(args.root.resolve(), args.port, args.api_port, args.host_root, args.host_platform)
-        elif args.command == "import-secret":
-            import_secret(args.root.resolve(), sys.stdin.read(1024 * 1024), args.require_complete)
         elif args.command == "seed":
             asyncio.run(seed_database())
         elif args.command == "serve":

@@ -26,7 +26,7 @@ class ConfigurationTests(unittest.TestCase):
         shutil.copytree(ROOT / "templates", self.root / "templates")
         self.keys = {key: f"synthetic-{key}" for key in bootstrap.REQUIRED_INTEGRATIONS}
         self.keys["AWS_REGION"] = "test-region"
-        bootstrap.private_write(self.root / ".local/integrations.env", bootstrap.env_text(self.keys))
+        bootstrap.private_write(self.root / "sources/backend/.env", bootstrap.env_text(self.keys))
 
     def tearDown(self):
         self.temp.cleanup()
@@ -72,10 +72,22 @@ class ConfigurationTests(unittest.TestCase):
     def test_missing_credentials_preserves_runtime_files(self):
         self.configure()
         original = (self.root / ".local/backend.env").read_text()
-        bootstrap.private_write(self.root / ".local/integrations.env", "OPENAI_API_KEY='synthetic'\n")
-        with self.assertRaisesRegex(ValueError, "Credenciais incompletas"):
+        bootstrap.private_write(self.root / "sources/backend/.env", "OPENAI_API_KEY='synthetic'\n")
+        with self.assertRaisesRegex(ValueError, "ANTHROPIC_API_KEY"):
             self.configure()
         self.assertEqual(original, (self.root / ".local/backend.env").read_text())
+
+    def test_placeholder_credentials_are_reported_without_values(self):
+        keys = {**self.keys, "OPENAI_API_KEY": "..."}
+        bootstrap.private_write(self.root / "sources/backend/.env", bootstrap.env_text(keys))
+        with self.assertRaisesRegex(ValueError, "OPENAI_API_KEY"):
+            self.configure()
+
+    def test_missing_backend_env_stops_before_generating_runtime_files(self):
+        (self.root / "sources/backend/.env").unlink()
+        with self.assertRaisesRegex(ValueError, "sources/backend/.env.example"):
+            self.configure()
+        self.assertFalse((self.root / ".local/backend.env").exists())
 
     def test_old_demo_settings_migrate_without_changing_passwords(self):
         self.configure()
@@ -100,47 +112,30 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(backend["MARKETING_HUB_VERIFY_SSL"], "true")
         self.assertEqual(backend["GA4_AGENT_MODEL"], overrides["GA4_AGENT_MODEL"])
 
-    def test_import_handles_cli_json_string_and_does_not_print_values(self):
-        keys = {**self.keys, "RESEND_API_KEY": "synthetic-$HOME-$(never)-quote'", "GA4_AGENT_MODEL": "synthetic-model"}
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            bootstrap.import_secret(self.root, json.dumps(json.dumps(keys)))
-        self.assertEqual(self.values("integrations.env"), keys)
-        for value in keys.values():
-            self.assertNotIn(value, output.getvalue())
-
-    def test_failed_aws_stream_cannot_replace_previous_secret(self):
-        original = (self.root / ".local/integrations.env").read_text()
-        with self.assertRaisesRegex(ValueError, "nao terminou"):
-            bootstrap.import_secret(self.root, json.dumps(self.keys), require_complete=True)
-        self.assertEqual(original, (self.root / ".local/integrations.env").read_text())
-        bootstrap.import_secret(self.root, json.dumps(self.keys) + "\nINSIGHTS_SECRET_COMPLETE\n", require_complete=True)
-        self.assertEqual(self.values("integrations.env"), self.keys)
-
-    def test_invalid_secret_preserves_previous_credentials_and_hides_content(self):
-        original = (self.root / ".local/integrations.env").read_text()
-        for raw in ('synthetic-sensitive-invalid-json', '[]', json.dumps({"SECRET": "synthetic-sensitive"}),
-                    json.dumps({**self.keys, "BAD": "synthetic\nmultiline"})):
-            with self.assertRaises(ValueError) as error:
-                bootstrap.import_secret(self.root, raw)
-            self.assertNotIn("synthetic-sensitive", str(error.exception))
-            self.assertEqual(original, (self.root / ".local/integrations.env").read_text())
-
     def test_google_sheets_is_optional_and_pem_is_serialized_safely(self):
-        keys = {**self.keys, "GOOGLE_SHEETS_PRIVATE_KEY": "synthetic\nprivate\nkey"}
-        bootstrap.import_secret(self.root, json.dumps(keys))
-        self.assertEqual(self.values("integrations.env")["GOOGLE_SHEETS_PRIVATE_KEY"], "synthetic\\nprivate\\nkey")
+        keys = {**self.keys, "GOOGLE_SHEETS_PRIVATE_KEY": r"synthetic\nprivate\nkey"}
+        bootstrap.private_write(self.root / "sources/backend/.env", bootstrap.env_text(keys))
+        self.assertEqual(bootstrap.read_env(self.root / "sources/backend/.env")["GOOGLE_SHEETS_PRIVATE_KEY"], keys["GOOGLE_SHEETS_PRIVATE_KEY"])
         self.configure()
 
     def test_enabled_github_requires_envelope_configuration(self):
         keys = {**self.keys, "GITHUB_MCP_ENABLED": "true"}
+        bootstrap.private_write(self.root / "sources/backend/.env", bootstrap.env_text(keys))
         with self.assertRaisesRegex(ValueError, "GITHUB_CREDENTIALS_SERVICE_TOKEN"):
-            bootstrap.import_secret(self.root, json.dumps(keys))
+            self.configure()
 
     def test_hub_must_use_https_and_no_embedded_credentials(self):
         for url in ("http://hub.invalid", "https://secret@hub.invalid", "https://hub.invalid?token=synthetic"):
+            bootstrap.private_write(self.root / "sources/backend/.env", bootstrap.env_text(self.keys))
+            bootstrap.private_write(self.root / ".local/integrations.override.env", bootstrap.env_text({"MARKETING_HUB_BASE_URL": url}))
             with self.assertRaisesRegex(ValueError, "HTTPS"):
-                bootstrap.import_secret(self.root, json.dumps({**self.keys, "MARKETING_HUB_BASE_URL": url}))
+                self.configure()
+
+    def test_hub_endpoint_defaults_to_avanti_even_if_backend_sample_is_stale(self):
+        values = {**self.keys, "MARKETING_HUB_BASE_URL": "https://13.217.147.225.nip.io"}
+        bootstrap.private_write(self.root / "sources/backend/.env", bootstrap.env_text(values))
+        self.configure()
+        self.assertEqual(self.values("backend.env")["MARKETING_HUB_BASE_URL"], bootstrap.DEFAULT_MARKETING_HUB_BASE_URL)
 
     def test_literal_values_are_not_expanded_or_executed(self):
         values = {"SAMPLE": r"a'$(touch NEVER_CREATED)$HOME\literal\n"}
@@ -170,8 +165,9 @@ class ConfigurationTests(unittest.TestCase):
     @unittest.skipIf(os.name == "nt", "Windows ACLs are verified by native script")
     def test_secret_files_are_owner_only(self):
         self.configure()
-        for name in ("backend.env", "frontend.env", "compose.env", "secrets.json", "access.txt", "integrations.env"):
+        for name in ("backend.env", "frontend.env", "compose.env", "secrets.json", "access.txt"):
             self.assertEqual((self.root / ".local" / name).stat().st_mode & 0o777, 0o600)
+        self.assertEqual((self.root / "sources/backend/.env").stat().st_mode & 0o777, 0o600)
 
     def test_generated_local_passwords_are_not_printed(self):
         output = io.StringIO()
@@ -222,7 +218,7 @@ class CodexShortcutTests(unittest.TestCase):
             shutil.copy(ROOT / "sources.lock", root)
             shutil.copytree(ROOT / "templates", root / "templates")
             with contextlib.redirect_stdout(io.StringIO()):
-                bootstrap.private_write(root / ".local/integrations.env", bootstrap.env_text({key: "synthetic" for key in bootstrap.REQUIRED_INTEGRATIONS}))
+                bootstrap.private_write(root / "sources/backend/.env", bootstrap.env_text({key: "synthetic" for key in bootstrap.REQUIRED_INTEGRATIONS}))
                 bootstrap.configure(root, None, None, "/Users/person/insights-local", "macos")
             projects = json.loads((root / ".local/codex-projects.json").read_text())
             self.assertEqual(projects["backend"]["path"], "/Users/person/insights-local/sources/backend")
@@ -230,6 +226,26 @@ class CodexShortcutTests(unittest.TestCase):
 
 
 class LauncherTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "Windows launcher is tested in native PowerShell")
+    @unittest.skipUnless(shutil.which("bash"), "Bash is not available")
+    def test_start_requires_backend_env_before_compose_services(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / ".local").mkdir()
+            (root / ".local/compose.env").write_text("LOCAL_MODE='connected'\n")
+            binary = root / "bin"
+            binary.mkdir()
+            docker = binary / "docker"
+            docker.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$INSIGHTS_DOCKER_LOG"\n')
+            docker.chmod(0o755)
+            log = root / "docker.log"
+            env = {**os.environ, "PATH": str(binary) + os.pathsep + os.environ["PATH"], "INSIGHTS_DOCKER_LOG": str(log)}
+            result = subprocess.run(["bash", str(ROOT / "scripts/local.sh"), "start", "--root", str(root)],
+                                    env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("sources/backend/.env", result.stderr)
+            self.assertFalse(any("compose --project-name" in line for line in log.read_text().splitlines()))
+
     @unittest.skipIf(os.name == "nt", "Windows launcher is tested in native PowerShell")
     @unittest.skipUnless(shutil.which("bash"), "Bash is not available")
     def test_codex_opens_selected_host_link_without_docker(self):

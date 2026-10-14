@@ -28,7 +28,8 @@ Uso: bash scripts/local.sh <setup|start|stop|status|doctor|codex|help> [opcoes]
   --no-browser          Nao abrir o navegador.
   --non-interactive     Nao iniciar logins ou confirmacoes interativas.
   --project frontend|backend|all  Pasta a abrir com codex (padrao all).
-setup instala dependencias ausentes, clona, configura e inicia.
+setup instala dependencias ausentes, clona os projetos e solicita a configuracao
+privada em sources/backend/.env antes de iniciar os servicos.
 start/stop/status/doctor/codex nao instalam software.
 codex abre conversas nas pastas dos aplicativos; confira o cadastro de projetos no app.
 USAGE
@@ -181,9 +182,17 @@ select_docker() {
 
 ensure_checkout() {
   local file
-  for file in scripts/bootstrap_local.py scripts/macos.sh scripts/macos-askpass.sh scripts/aws.sh scripts/aws-cli-public-key.asc compose.local.yml templates/nginx.conf sources.lock; do
+  for file in scripts/bootstrap_local.py scripts/macos.sh scripts/macos-askpass.sh compose.local.yml templates/nginx.conf sources.lock; do
     [ -f "$INSIGHTS_ROOT/$file" ] || fail "Repositorio incompleto: falta $file. O Codex deve usar o clone completo do insights-local, preservando esta pasta."
   done
+}
+
+require_backend_env() {
+  local backend_env="$INSIGHTS_ROOT/sources/backend/.env"
+  if [ ! -f "$backend_env" ]; then
+    fail "Antes de iniciar os servicos, crie sources/backend/.env copiando sources/backend/.env.example e preenchendo as configuracoes privadas localmente. Nao cole chaves ou senhas no chat do Codex. Depois execute setup novamente."
+  fi
+  chmod 600 "$backend_env" || fail "Nao foi possivel restringir o acesso a sources/backend/.env."
 }
 
 value() { sed -n "s/^$1=//p" "$2" | sed "s/^'//;s/'$//"; }
@@ -230,6 +239,8 @@ compose() {
 }
 
 start_stack() {
+  require_backend_env
+  [ -f "$INSIGHTS_ROOT/.local/backend.env" ] || fail "Configuracao local ausente. Execute setup depois de preencher sources/backend/.env."
   [ "$(value LOCAL_MODE "$INSIGHTS_ROOT/.local/compose.env")" = connected ] \
     || fail "Instalacao anterior ainda usa demonstracao. Execute setup para preparar as integracoes reais."
   compose config --quiet
@@ -263,15 +274,11 @@ case "$INSIGHTS_COMMAND" in
       *) fail "Use local.ps1 no Windows.";;
     esac
     select_docker
-    # shellcheck source=scripts/aws.sh
-    . "$INSIGHTS_ROOT/scripts/aws.sh"
-    install_aws
     progress "Conectando o GitHub e preparando os projetos."
     checkout_source backend BACKEND
     checkout_source frontend FRONTEND
-    progress "Conectando a AWS e preparando as integracoes."
-    ensure_aws_session
-    fetch_integrations
+    progress "Verificando a configuracao privada do backend antes de iniciar os servicos."
+    require_backend_env
     progress "Configurando o ambiente local."
     INSIGHTS_HOST_PLATFORM=linux
     if [ "$(uname -s)" = Darwin ]; then INSIGHTS_HOST_PLATFORM=macos; fi
@@ -295,7 +302,7 @@ case "$INSIGHTS_COMMAND" in
       "Interface: http://localhost:$(value LOCAL_WEB_PORT "$INSIGHTS_ROOT/.local/compose.env")";;
   doctor)
     printf '%s\n' "Sistema: $(uname -s) $(uname -m)" "Pasta: $INSIGHTS_ROOT"
-    for INSIGHTS_TOOL in git gh docker aws; do command -v "$INSIGHTS_TOOL" >/dev/null || fail "Dependencia ausente: $INSIGHTS_TOOL. Execute setup."; done
+    for INSIGHTS_TOOL in git gh docker; do command -v "$INSIGHTS_TOOL" >/dev/null || fail "Dependencia ausente: $INSIGHTS_TOOL. Execute setup."; done
     select_docker
     "${INSIGHTS_DOCKER[@]}" compose version
     if [ -f "$INSIGHTS_ROOT/.local/compose.env" ]; then

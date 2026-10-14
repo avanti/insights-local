@@ -29,7 +29,7 @@ function Show-Usage {
     Write-Host 'Avanti Insights local'
     Write-Host '.\scripts\local.ps1 <setup|start|stop|status|doctor|codex|help>'
     Write-Host 'Opcoes: -Root PASTA -Port 3000 -ApiPort 8000 -NoBrowser -NonInteractive'
-    Write-Host 'setup instala dependencias ausentes, clona, configura e inicia.'
+    Write-Host 'setup instala dependencias, clona os projetos e solicita sources/backend/.env antes de iniciar os servicos.'
     Write-Host 'Os outros comandos nao instalam software.'
     Write-Host 'codex -Project frontend|backend|all abre as pastas no Codex (padrao all).'
     Write-Host 'Confira o cadastro dos projetos na barra lateral do aplicativo.'
@@ -109,7 +109,6 @@ function Install-Dependencies {
     }
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Install-Package 'Git.Git' }
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { Install-Package 'GitHub.cli' }
-    Install-Aws
     $wslReady = $false
     if (Get-Command wsl.exe -ErrorAction SilentlyContinue) {
         $savedPreference = $ErrorActionPreference
@@ -145,81 +144,17 @@ function Install-Dependencies {
     }
 }
 
-function Test-AwsVersion {
-    if (-not (Get-Command aws -ErrorAction SilentlyContinue)) { return $false }
-    $saved = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try { $versionText = (& aws --version 2>&1 | Out-String) } finally { $ErrorActionPreference = $saved }
-    return ($versionText -match 'aws-cli/(2\.(\d+)\.\d+)' -and [int]$Matches[2] -ge 32)
-}
-
-function Install-Aws {
-    if (Test-AwsVersion) { return }
-    Write-Host 'Preparando o acesso a AWS para entrar pelo navegador.'
-    if (Get-Command aws -ErrorAction SilentlyContinue) { Install-Package 'Amazon.AWSCLI' 'upgrade' }
-    else { Install-Package 'Amazon.AWSCLI' }
-    if (-not (Test-AwsVersion)) { throw 'AWS CLI 2.32.0 ou posterior ainda nao esta disponivel.' }
-}
-
-function Get-AwsArguments {
-    $profile = $env:INSIGHTS_AWS_PROFILE
-    if (-not $profile) { $profile = 'avanti-insights-local' }
-    $region = $env:INSIGHTS_AWS_REGION
-    if (-not $region) { $region = 'us-east-1' }
-    return @('--profile', $profile, '--region', $region)
-}
-
-function Test-AwsSession {
-    $saved = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        $arguments = (Get-AwsArguments) + @('sts', 'get-caller-identity', '--cli-connect-timeout', '10', '--cli-read-timeout', '15')
-        & aws @arguments *> $null
-        return $LASTEXITCODE -eq 0
-    } finally { $ErrorActionPreference = $saved }
-}
-
-function Ensure-AwsSession {
-    $env:AWS_PAGER = ''
-    $env:AWS_CLI_AUTO_PROMPT = 'off'
-    if (Test-AwsSession) { return }
-    if ($NonInteractive -or $env:CI) { throw 'Falta entrar na AWS. Retome setup com o Codex em modo interativo.' }
-    Write-Host 'Entre na conta AWS da Avanti na janela do navegador, confirme o MFA e autorize o acesso local. A senha fica somente na AWS.'
-    $arguments = Get-AwsArguments
-    $method = $env:INSIGHTS_AWS_LOGIN_METHOD
-    if (-not $method) { $method = 'console' }
-    if ($method -eq 'console') {
-        $region = $env:INSIGHTS_AWS_REGION
-        if (-not $region) { $region = 'us-east-1' }
-        Invoke-Native 'aws' ($arguments + @('configure', 'set', 'region', $region))
-        Invoke-Native 'aws' ($arguments + @('login'))
-    } elseif ($method -eq 'sso') {
-        Invoke-Native 'aws' ($arguments + @('sso', 'login'))
-    } else { throw 'INSIGHTS_AWS_LOGIN_METHOD deve ser console ou sso.' }
-    if (-not (Test-AwsSession)) { throw 'A sessao AWS nao ficou disponivel. Confira a autenticacao no navegador.' }
-}
-
 function Protect-LocalFiles {
     $local = Join-Path $Root '.local'
     New-Item -ItemType Directory -Force $local | Out-Null
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     Invoke-Native 'icacls.exe' @($local, '/inheritance:r', '/grant:r', "${identity}:(OI)(CI)F",
         '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F', '/T', '/Q')
-}
-
-function Fetch-Integrations {
-    $secretId = $env:INSIGHTS_SECRET_ID
-    if (-not $secretId) { $secretId = 'synapse/review-app/env' }
-    $arguments = (Get-AwsArguments) + @('secretsmanager', 'get-secret-value', '--secret-id', $secretId,
-        '--query', 'SecretString', '--output', 'json', '--cli-connect-timeout', '10', '--cli-read-timeout', '30')
-    # Keep the response in memory; never echo it or write raw JSON to disk.
-    $secretJson = & aws @arguments
-    if ($LASTEXITCODE -ne 0) { throw 'Nao foi possivel obter as integracoes. Confira a permissao de leitura do segredo AWS.' }
-    try {
-        Invoke-Docker @('run', '--rm', '-i', '--network', 'none', '--mount', "type=bind,source=$Root,target=/bootstrap",
-            'python:3.11-slim', 'python', '/bootstrap/scripts/bootstrap_local.py', 'import-secret') -InputText ($secretJson -join "`n")
-    } finally { $secretJson = $null }
-    Protect-LocalFiles
+    $backendEnv = Join-Path $Root 'sources\backend\.env'
+    if (Test-Path $backendEnv -PathType Leaf) {
+        Invoke-Native 'icacls.exe' @($backendEnv, '/inheritance:r', '/grant:r', "${identity}:F",
+            '*S-1-5-18:F', '*S-1-5-32-544:F', '/Q')
+    }
 }
 
 function Select-Docker {
@@ -244,11 +179,19 @@ function Invoke-Docker {
 }
 
 function Ensure-Checkout {
-    foreach ($file in @('scripts/bootstrap_local.py', 'scripts/macos.sh', 'scripts/macos-askpass.sh', 'scripts/aws.sh', 'scripts/aws-cli-public-key.asc', 'templates/nginx.conf', 'compose.local.yml', 'sources.lock')) {
+    foreach ($file in @('scripts/bootstrap_local.py', 'scripts/macos.sh', 'scripts/macos-askpass.sh', 'templates/nginx.conf', 'compose.local.yml', 'sources.lock')) {
         if (-not (Test-Path (Join-Path $Root $file) -PathType Leaf)) {
             throw "Repositorio incompleto: falta $file. O Codex deve usar o clone completo do insights-local, preservando esta pasta."
         }
     }
+}
+
+function Assert-BackendEnv {
+    $backendEnv = Join-Path $Root 'sources\backend\.env'
+    if (-not (Test-Path $backendEnv -PathType Leaf)) {
+        throw 'Antes de iniciar os servicos, crie sources/backend/.env copiando sources/backend/.env.example e preenchendo as configuracoes privadas localmente. Nao cole chaves ou senhas no chat do Codex. Depois execute setup novamente.'
+    }
+    Protect-LocalFiles
 }
 
 function Get-LiteralValue {
@@ -323,6 +266,10 @@ function Invoke-Compose {
 }
 
 function Start-Stack {
+    Assert-BackendEnv
+    if (-not (Test-Path (Join-Path $Root '.local\backend.env') -PathType Leaf)) {
+        throw 'Configuracao local ausente. Execute setup depois de preencher sources/backend/.env.'
+    }
     if ((Get-LiteralValue 'LOCAL_MODE' (Join-Path $Root '.local/compose.env')) -ne 'connected') {
         throw 'Instalacao anterior ainda usa demonstracao. Execute setup para preparar as integracoes reais.'
     }
@@ -350,10 +297,8 @@ try {
             Write-SetupProgress 'Conectando o GitHub e preparando os projetos.'
             Ensure-Source 'backend' 'BACKEND'
             Ensure-Source 'frontend' 'FRONTEND'
-            Write-SetupProgress 'Conectando a AWS e preparando as integracoes.'
-            Protect-LocalFiles
-            Ensure-AwsSession
-            Fetch-Integrations
+            Write-SetupProgress 'Verificando a configuracao privada do backend antes de iniciar os servicos.'
+            Assert-BackendEnv
             Write-SetupProgress 'Configurando o ambiente local.'
             $configArgs = @('configure', '--host-root', $Root, '--host-platform', 'windows')
             if ($Port) { $configArgs += @('--port', "$Port") }
@@ -379,7 +324,7 @@ try {
         'doctor' {
             Write-Host ("Sistema: " + [Environment]::OSVersion.VersionString)
             Write-Host "Pasta: $Root"
-            foreach ($tool in @('git', 'gh', 'docker', 'aws')) {
+            foreach ($tool in @('git', 'gh', 'docker')) {
                 if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "Dependencia ausente: $tool. Execute setup." }
             }
             Select-Docker

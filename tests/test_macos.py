@@ -223,7 +223,7 @@ mac_admin /usr/sbin/installer -pkg "$INSIGHTS_ROOT/Homebrew.pkg" -target /
         self.assertEqual(self.events(), "")
 
     def test_launcher_failure_records_stage_and_preserves_exit_code(self):
-        for name in ("bootstrap_local.py", "macos.sh", "aws.sh", "aws-cli-public-key.asc"):
+        for name in ("bootstrap_local.py", "macos.sh"):
             shutil.copy(ROOT / "scripts" / name, self.root / "scripts")
         (self.root / "templates").mkdir()
         shutil.copy(ROOT / "templates/nginx.conf", self.root / "templates")
