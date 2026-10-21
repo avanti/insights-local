@@ -87,9 +87,88 @@ Este repositorio público prepara dois aplicativos privados da organização Ava
   verifica a sessão local, sem disparar análises ou mostrar dados dos clientes.
 - Use HTTPS com verificação TLS para o Hub. O endpoint padrão é
   https://100.55.149.93.nip.io.
+- Para pedidos de alteração nos aplicativos frontend/backend, siga o fluxo
+  obrigatório em "Alterações nos aplicativos" abaixo antes de editar código.
 - Rode python -m unittest discover -s tests -v, bash -n scripts/local.sh e os
   testes PowerShell antes de publicar alterações.
 - Para alterações de macOS, valide scripts/macos.sh e macos-askpass.sh com
   ShellCheck e Bash 3.2. Os testes usam comandos simulados; não substituem uma
   instalação em Mac limpo com janelas e permissões reais.
 - Atualizações de sources.lock exigem novo smoke test com os dois aplicativos.
+
+## Alterações nos aplicativos
+
+Estas regras se aplicam quando a solicitação envolve `avanti-insights-ai` ou
+`backend-insights`, incluindo código, documentação, testes, dependências e
+configuração. O instalador `insights-local` é um repositório separado. Localize
+os caminhos reais dos dois aplicativos por `.local/codex-projects.json` e
+confirme cada raiz Git; não presuma que os clones estão dentro de `sources/`.
+
+### Estado local, atualização e branches
+
+- Antes de começar uma nova tarefa de alteração, confira a branch e
+  `git status --short` dos dois aplicativos, mesmo se o pedido mencionar apenas
+  um. Identifique mudanças staged, unstaged e arquivos não rastreados. Resuma os
+  caminhos e o tipo de mudança ao usuário; não mostre valores de segredos.
+- Se houver alterações locais que não pertençam ao trabalho ativo do Codex,
+  pare e pergunte ao usuário como tratá-las. Não as descarte, sobrescreva, misture,
+  faça stash, commit ou troque de branch sem autorização explícita. Não trate as
+  alterações produzidas pelo Codex na tarefa ativa como trabalho pré-existente:
+  mantenha-as na branch dessa tarefa quando o usuário pedir ajustes relacionados.
+- No primeiro pedido de alteração de uma nova conversa, informe o nome sugerido
+  para a branch, em quais repositórios ela será criada e que as duas `main` serão
+  atualizadas; peça confirmação antes de criá-la e não edite os aplicativos antes
+  de a branch existir. Uma confirmação explícita para criar a branch, dada no
+  próprio pedido, já vale. Se a pessoa pedir para continuar uma tarefa/PR existente
+  em outra conversa, confirme e reutilize aquela branch. Reutilize a mesma branch
+  nos pedidos complementares da mesma tarefa/conversa; não crie uma branch para
+  cada ajuste. Se a tarefa abranger os dois aplicativos, use o mesmo nome de
+  branch nos dois. Se afetar apenas um, crie branch somente nele.
+- Depois de resolver o estado local e obter a confirmação da branch, atualize a
+  branch `main` local de ambos os aplicativos a partir de `origin/main` antes de
+  criar a branch de trabalho. Faça fetch e avance `main` somente por fast-forward;
+  não use reset forçado nem sobrescreva commits locais. Crie a branch de trabalho
+  a partir da `main` atualizada do(s) repositório(s) que serão alterados. Use o
+  prefixo `codex/` e um nome curto que descreva a tarefa.
+- Se autenticação, rede, conflito ou divergência impedir a atualização de
+  qualquer `main`, pare antes de criar a branch ou alterar os aplicativos.
+  Informe qual repositório falhou e o erro confirmado. Só prossiga sem atualizar
+  se o usuário autorizar isso explicitamente. Antes de prosseguir, explique que a
+  alteração partirá de uma revisão antiga e pode não conter correções ou mudanças
+  de contrato recentes, causar conflitos ou não ser compatível com o outro
+  aplicativo. Registre qual base desatualizada foi autorizada.
+
+### Verificação de fatos e limites de Labs
+
+- Não invente nem presuma endpoints, campos, permissões, variáveis, efeitos de
+  scripts ou comportamento de produção. Antes de propor uma implementação ou dar
+  instruções, verifique o código, os contratos OpenAPI/MCP, a documentação ou
+  testes relevantes. Para comportamento externo, consulte uma fonte autorizada e
+  atual. Separe fatos confirmados de hipóteses; se faltar evidência, diga o que
+  não foi possível verificar e pergunte como prosseguir. Não implemente uma
+  integração apoiada somente em uma suposição.
+- `avanti-hub` e `avanti-mcp-server` são fontes somente para consulta. Nunca
+  altere seus arquivos, branches, issues, PRs ou deploys. Se uma solicitação do
+  frontend/backend depender de mudança neles, informe que a equipe de Labs deve
+  fazê-la. Descreva para encaminhamento: repositório/componente, contrato ou
+  comportamento necessário, motivo, evidência encontrada e critério de aceite.
+  Não apresente detalhes ainda não confirmados como requisitos certos.
+
+### Pull requests, produção e merge
+
+- Se o usuário pedir um PR e não indicar a branch de destino, pergunte se deve
+  ser `develop` ou `main` e explique: `develop` passa pelos testes da equipe e
+  segue para o próximo dia de deploy; `main` não passa pelos testes da equipe e
+  só recebe deploy depois da autorização da gestão. Não escolha o destino pelo
+  usuário. A abertura de PR não autoriza merge.
+- Nunca faça merge automaticamente ao abrir um PR. Informe que o PR ficará
+  aberto para revisão; faça merge somente quando o usuário pedir explicitamente.
+- Nunca faça deploy por iniciativa própria. Mesmo quando o usuário pedir
+  deploy, prepare e revise a mudança, informe o ambiente, a branch/commit e a
+  ação que será executada e solicite uma confirmação final antes de iniciar.
+- Verifique se a mudança exige nova variável de ambiente ou execução de script
+  em produção. Quando exigir, informe isso ao usuário e inclua instrução explícita
+  na descrição do PR: nome da variável sem seu valor, local onde deve ser
+  configurada, script/comando, ordem e momento de execução. Nunca inclua segredos
+  no PR. Se a verificação não puder ser concluída, declare essa pendência na
+  descrição do PR em vez de afirmar que nenhuma ação é necessária.
