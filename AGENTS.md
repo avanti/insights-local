@@ -138,6 +138,26 @@ confirme cada raiz Git; não presuma que os clones estão dentro de `sources/`.
   de contrato recentes, causar conflitos ou não ser compatível com o outro
   aplicativo. Registre qual base desatualizada foi autorizada.
 
+### Reuso, compatibilidade e agendamentos
+
+- Antes de criar componente, função, método, endpoint ou fluxo novo, procure no
+  aplicativo por uma implementação reutilizável e siga os padrões existentes.
+  Prefira estender a implementação atual a duplicar comportamento. Antes de mudar
+  componente, função, método ou contrato compartilhado, localize e revise seus
+  usos e testes. Preserve compatibilidade ou atualize todos os consumidores
+  afetados; valide os fluxos relacionados com testes de regressão. Não prometa
+  que nada será quebrado sem evidência; informe riscos que não puder verificar.
+- Para qualquer pedido relacionado a agendamentos — interface, API, criação,
+  edição, pausa, execução ou histórico — use e estenda o fluxo de scheduler já
+  existente. Na raiz do backend, leia `docs/scheduler_adapters.md` e confira
+  `app/api/routes/scheduled_tasks.py`, `app/scheduler/service.py`, o registry e
+  os adapters do objetivo. Na raiz do frontend, procure primeiro nas telas,
+  ações, rotas e componentes existentes em `app/insights/schedules/` e
+  `app/api/schedules/`. Não crie cron, Celery Beat ou outro mecanismo paralelo.
+  Se o fluxo atual não comportar o pedido, demonstre a limitação no
+  código/documentação e proponha como estendê-lo antes de escolher uma arquitetura
+  diferente.
+
 ### Verificação de fatos e limites de Labs
 
 - Não invente nem presuma endpoints, campos, permissões, variáveis, efeitos de
@@ -166,9 +186,9 @@ confirme cada raiz Git; não presuma que os clones estão dentro de `sources/`.
 - Nunca faça deploy por iniciativa própria. Mesmo quando o usuário pedir
   deploy, prepare e revise a mudança, informe o ambiente, a branch/commit e a
   ação que será executada e solicite uma confirmação final antes de iniciar.
-- Verifique se a mudança exige nova variável de ambiente ou execução de script
-  em produção. Quando exigir, informe isso ao usuário e inclua instrução explícita
-  na descrição do PR: nome da variável sem seu valor, local onde deve ser
-  configurada, script/comando, ordem e momento de execução. Nunca inclua segredos
-  no PR. Se a verificação não puder ser concluída, declare essa pendência na
-  descrição do PR em vez de afirmar que nenhuma ação é necessária.
+- Em todo PR, verifique e declare na descrição se há variável de ambiente a
+  configurar antes do deploy ou script a executar depois dele. Inclua uma seção
+  `Configuração e pós-deploy` e informe uma destas situações: ações necessárias,
+  nenhuma ação necessária, ou verificação pendente. Para cada ação, indique o
+  nome da variável sem valor secreto, onde configurá-la, o comando/script e a
+  ordem/momento de execução. Avise também o usuário. Nunca inclua segredos no PR.
