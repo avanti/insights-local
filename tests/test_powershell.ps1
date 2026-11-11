@@ -38,23 +38,6 @@ try {
     if ($global:InsightsContractObserved | Where-Object { $_ -match '(--volumes| down -v)' }) {
         throw 'Stop must preserve data volumes.'
     }
-    foreach ($name in @('frontend', 'backend')) {
-        New-Item -ItemType Directory -Force (Join-Path $fixture "sources/$name/.git") | Out-Null
-        New-Item -ItemType Directory -Force (Join-Path $fixture '.local/codex') | Out-Null
-        [IO.File]::WriteAllText((Join-Path $fixture ".local/codex/$name.link"), "codex://new?path=C%3A%5CTest%20Folder%5Csources%5C$name")
-    }
-    $global:InsightsContractObserved.Clear()
-    & $launcher codex -Root $fixture -Project frontend
-    if ($LASTEXITCODE -ne 0) { throw 'Codex shortcut contract failed.' }
-    if ($global:InsightsContractObserved.Count -ne 1 -or $global:InsightsContractObserved[0] -ne 'open:codex://new?path=C%3A%5CTest%20Folder%5Csources%5Cfrontend') {
-        throw 'Codex must open only the selected host link without Docker.'
-    }
-    $global:InsightsContractObserved.Clear()
-    [IO.File]::WriteAllText((Join-Path $fixture '.local/codex/backend.link'), 'https://unexpected.invalid')
-    & $launcher codex -Root $fixture
-    if ($LASTEXITCODE -ne 2 -or $global:InsightsContractObserved.Count -ne 0) {
-        throw 'Validate all shortcuts before opening any project.'
-    }
     $global:InsightsContractObserved.Clear()
     & $launcher start -Root $fixture
     if ($LASTEXITCODE -ne 2 -or ($global:InsightsContractObserved | Where-Object { $_ -match 'compose .* (config|up)' })) {
@@ -69,7 +52,7 @@ try {
     if (-not $progress.Contains('Preparando as ferramentas') -or -not $progress.Contains('interrompido')) {
         throw 'A failed setup must record its stage for the next attempt.'
     }
-    Write-Host 'PowerShell syntax, status, profile isolation, stop, shortcuts, env guard and interrupted setup contracts passed.'
+    Write-Host 'PowerShell syntax, status, profile isolation, stop, env guard and interrupted setup contracts passed.'
 } finally {
     Remove-Item Function:docker -ErrorAction SilentlyContinue
     Remove-Item Function:Start-Process -ErrorAction SilentlyContinue

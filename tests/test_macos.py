@@ -121,7 +121,7 @@ install_macos
 ''')
         self.assertEqual(result.returncode, 2)
         self.assertIn("original mounting failure code 77", (self.root / ".local/install-macos.log").read_text())
-        self.assertIn("consultar", result.stderr)
+        self.assertIn("Consulte", result.stderr)
         self.assertNotIn("open:", self.events())
         self.assertNotIn("original mounting failure", result.stdout)
 

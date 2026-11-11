@@ -4,17 +4,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import html
 import json
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
-import plistlib
 import re
 import secrets
 import sys
 import tempfile
 import uuid
-from urllib.parse import quote
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -99,55 +96,24 @@ def private_write(path: Path, content: str) -> None:
             os.unlink(name)
 
 
-def codex_shortcuts(host_root: str, host_platform: str) -> dict[str, str]:
-    """Use the host path, never the Docker mount path, for desktop deep links."""
+def project_paths(host_root: str, host_platform: str) -> dict[str, str]:
+    """Use the host path, never the Docker mount path, for the app folders."""
     if host_platform not in {"macos", "linux", "windows"}:
-        raise ValueError("Sistema dos atalhos Codex invalido.")
+        raise ValueError("Sistema do host invalido.")
     if not host_root or any(char in host_root for char in ("\n", "\r", "\x00")):
-        raise ValueError("Pasta do host invalida para os atalhos Codex.")
+        raise ValueError("Pasta do host invalida.")
     host = PureWindowsPath(host_root) if host_platform == "windows" else PurePosixPath(host_root)
     if not host.is_absolute():
-        raise ValueError("Atalhos Codex exigem uma pasta absoluta do host.")
-    projects = {}
-    files = {}
-    cards = []
-    for name, label in (("frontend", "Frontend Insights"), ("backend", "Backend Insights")):
-        path = str(host / "sources" / name)
-        url = "codex://new?path=" + quote(path, safe="")
-        projects[name] = {"path": path, "url": url}
-        # A single-line URL lets the OS launchers read it without host Python.
-        files[f"codex/{name}.link"] = url + "\n"
-        if host_platform == "macos":
-            files[f"codex/{name}.webloc"] = plistlib.dumps({"URL": url}).decode("utf-8")
-        elif host_platform == "windows":
-            files[f"codex/{name}.url"] = f"[InternetShortcut]\r\nURL={url}\r\n"
-        cards.append(
-            f'<li><a href="{html.escape(url, quote=True)}">Abrir {label} no Codex</a>'
-            f'<p><code>{html.escape(path)}</code></p></li>'
-        )
-    files["codex-projects.json"] = json.dumps(projects, ensure_ascii=False, indent=2) + "\n"
-    files["codex-projects.html"] = """<!doctype html>
-<html lang="pt-BR"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Avanti Insights no Codex</title>
-<style>body{font:18px system-ui;max-width:760px;margin:48px auto;padding:0 24px;line-height:1.6}
-li{margin:24px 0}code{overflow-wrap:anywhere;font-size:14px}a{font-weight:600}</style>
-</head><body><h1>Avanti Insights no Codex</h1>
-<p>Os links abrem uma conversa no Codex usando a pasta local de cada aplicativo.
-O navegador pode pedir confirmacao para abrir o aplicativo.</p><ul>""" + "".join(cards) + """</ul>
-<p>Confira se as pastas aparecem como projetos na barra lateral. Se ainda nao
-aparecerem, use Criar projeto e selecione a pasta correspondente indicada acima.
-A abertura da conversa nao garante o cadastro permanente do projeto.</p>
-</body></html>
-"""
-    return files
+        raise ValueError("Informe uma pasta absoluta do host.")
+    projects = {name: {"path": str(host / "sources" / name)} for name in ("frontend", "backend")}
+    return {"projects.json": json.dumps(projects, ensure_ascii=False, indent=2) + "\n"}
 
 
 def configure(root: Path, port: int | None = None, api_port: int | None = None,
               host_root: str | None = None, host_platform: str | None = None) -> dict:
     local = root / ".local"
     platform = host_platform or ("windows" if os.name == "nt" else "macos" if sys.platform == "darwin" else "linux")
-    shortcuts = codex_shortcuts(host_root or str(root.resolve()), platform)
+    projects = project_paths(host_root or str(root.resolve()), platform)
     previous = json.loads((local / "settings.json").read_text()) if (local / "settings.json").exists() else {}
     selected_mode = "connected"
     web_port = port if port is not None else previous.get("port", 3000)
@@ -162,7 +128,7 @@ def configure(root: Path, port: int | None = None, api_port: int | None = None,
         raise ValueError(
             "Antes de iniciar os servicos, crie sources/backend/.env copiando "
             "sources/backend/.env.example e preenchendo as configuracoes privadas localmente. "
-            "Nao cole chaves ou senhas no chat do Codex. Depois execute setup novamente."
+            "Nao cole chaves ou senhas em chats de assistentes de IA. Depois execute setup novamente."
         )
     overrides = read_env(local / "integrations.override.env")
     credentials = validate_credentials({
@@ -239,7 +205,7 @@ def configure(root: Path, port: int | None = None, api_port: int | None = None,
     settings = {"mode": selected_mode, "port": web_port, "api_port": backend_port}
     # All values are validated before replacing any previously working file.
     contents = {
-        **shortcuts,
+        **projects,
         "backend.env": env_text(backend),
         "frontend.env": env_text(frontend),
         "compose.env": env_text(compose),

@@ -15,36 +15,32 @@ INSIGHTS_PORT=""
 INSIGHTS_API_PORT=""
 INSIGHTS_NO_BROWSER=false
 INSIGHTS_NONINTERACTIVE=false
-INSIGHTS_PROJECT="all"
 INSIGHTS_DOCKER=(docker)
 
 usage() {
   cat <<'USAGE'
 Avanti Insights local
-Uso: bash scripts/local.sh <setup|start|stop|status|doctor|codex|help> [opcoes]
+Uso: bash scripts/local.sh <setup|start|stop|status|doctor|help> [opcoes]
   --root DIRETORIO       Pasta do repositorio clonado.
   --port NUMERO          Porta da interface (padrao 3000).
   --api-port NUMERO      Porta da API (padrao 8000).
   --no-browser          Nao abrir o navegador.
   --non-interactive     Nao iniciar logins ou confirmacoes interativas.
-  --project frontend|backend|all  Pasta a abrir com codex (padrao all).
 setup instala dependencias ausentes, clona os projetos e solicita a configuracao
 privada em sources/backend/.env antes de iniciar os servicos.
-start/stop/status/doctor/codex nao instalam software.
-codex abre conversas nas pastas dos aplicativos; confira o cadastro de projetos no app.
+start/stop/status/doctor nao instalam software.
 USAGE
 }
 
 fail() { printf '%s\n' "$*" >&2; exit 2; }
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --root|--port|--api-port|--project)
+    --root|--port|--api-port)
       [ "$#" -ge 2 ] || fail "Falta o valor de $1."
       case "$1" in
         --root) INSIGHTS_ROOT="$2";;
         --port) INSIGHTS_PORT="$2";;
         --api-port) INSIGHTS_API_PORT="$2";;
-        --project) INSIGHTS_PROJECT="$2";;
       esac
       shift 2;;
     --no-browser) INSIGHTS_NO_BROWSER=true; shift;;
@@ -52,11 +48,7 @@ while [ "$#" -gt 0 ]; do
     *) fail "Opcao desconhecida: $1";;
   esac
 done
-case "$INSIGHTS_COMMAND" in setup|start|stop|status|doctor|codex|help|--help|-h) ;; *) fail "Comando desconhecido: $INSIGHTS_COMMAND";; esac
-case "$INSIGHTS_PROJECT" in all|frontend|backend) ;; *) fail "Projeto deve ser frontend, backend ou all.";; esac
-if [ "$INSIGHTS_COMMAND" != codex ] && [ "$INSIGHTS_PROJECT" != all ]; then
-  fail "Use codex para selecionar um projeto."
-fi
+case "$INSIGHTS_COMMAND" in setup|start|stop|status|doctor|help|--help|-h) ;; *) fail "Comando desconhecido: $INSIGHTS_COMMAND";; esac
 for INSIGHTS_PORT_VALUE in "$INSIGHTS_PORT" "$INSIGHTS_API_PORT"; do
   if [ -n "$INSIGHTS_PORT_VALUE" ]; then
     [[ "$INSIGHTS_PORT_VALUE" =~ ^[0-9]{1,5}$ ]] || fail "Porta invalida."
@@ -84,29 +76,8 @@ setup_exit() {
   if [ "$code" -ne 0 ]; then
     printf 'Etapa: %s\nPasta: %s\nResultado: interrompido (codigo %s)\n' \
       "$INSIGHTS_STAGE" "$INSIGHTS_ROOT" "$code" > "$INSIGHTS_ROOT/.local/setup-progress.txt" || true
-    printf '%s\n' "O Codex pode retomar na mesma pasta. A etapa foi registrada em .local/setup-progress.txt." >&2
+    printf '%s\n' "Execute setup novamente na mesma pasta para retomar. A etapa foi registrada em .local/setup-progress.txt." >&2
   fi
-}
-
-open_codex() {
-  INSIGHTS_CODEX_LINKS=()
-  for INSIGHTS_NAME in frontend backend; do
-    if [ "$INSIGHTS_PROJECT" != all ] && [ "$INSIGHTS_PROJECT" != "$INSIGHTS_NAME" ]; then continue; fi
-    INSIGHTS_LINK="$INSIGHTS_ROOT/.local/codex/$INSIGHTS_NAME.link"
-    [ -f "$INSIGHTS_LINK" ] || fail "Atalhos Codex ausentes. Execute setup novamente na mesma pasta."
-    [ -d "$INSIGHTS_ROOT/sources/$INSIGHTS_NAME/.git" ] || fail "Pasta do aplicativo $INSIGHTS_NAME ausente. Execute setup."
-    INSIGHTS_URL="$(cat "$INSIGHTS_LINK")"
-    [[ "$INSIGHTS_URL" =~ ^codex://new\?path=[a-zA-Z0-9%._~-]+$ ]] || fail "Atalho Codex invalido. Execute setup novamente."
-    INSIGHTS_CODEX_LINKS+=("$INSIGHTS_URL")
-  done
-  case "$(uname -s)" in
-    Darwin) INSIGHTS_OPENER=open;;
-    Linux) INSIGHTS_OPENER=xdg-open;;
-    *) fail "Use local.ps1 no Windows.";;
-  esac
-  command -v "$INSIGHTS_OPENER" >/dev/null || fail "Abra .local/codex-projects.html no navegador para usar os atalhos Codex."
-  for INSIGHTS_URL in "${INSIGHTS_CODEX_LINKS[@]}"; do "$INSIGHTS_OPENER" "$INSIGHTS_URL"; done
-  printf '%s\n' "Solicitada a abertura das pastas no Codex. Confira se aparecem como projetos na barra lateral."
 }
 
 admin() {
@@ -183,14 +154,14 @@ select_docker() {
 ensure_checkout() {
   local file
   for file in scripts/bootstrap_local.py scripts/macos.sh scripts/macos-askpass.sh compose.local.yml templates/nginx.conf sources.lock; do
-    [ -f "$INSIGHTS_ROOT/$file" ] || fail "Repositorio incompleto: falta $file. O Codex deve usar o clone completo do insights-local, preservando esta pasta."
+    [ -f "$INSIGHTS_ROOT/$file" ] || fail "Repositorio incompleto: falta $file. Use o clone completo do insights-local, preservando esta pasta."
   done
 }
 
 require_backend_env() {
   local backend_env="$INSIGHTS_ROOT/sources/backend/.env"
   if [ ! -f "$backend_env" ]; then
-    fail "Antes de iniciar os servicos, crie sources/backend/.env copiando sources/backend/.env.example e preenchendo as configuracoes privadas localmente. Nao cole chaves ou senhas no chat do Codex. Depois execute setup novamente."
+    fail "Antes de iniciar os servicos, crie sources/backend/.env copiando sources/backend/.env.example e preenchendo as configuracoes privadas localmente. Nao cole chaves ou senhas em chats de assistentes de IA. Depois execute setup novamente."
   fi
   chmod 600 "$backend_env" || fail "Nao foi possivel restringir o acesso a sources/backend/.env."
 }
@@ -216,11 +187,11 @@ checkout_source() {
       || fail "A origem do checkout incompleto difere de sources.lock."
     if ! gh auth status --hostname github.com >/dev/null 2>&1; then
       if [ "$INSIGHTS_NONINTERACTIVE" = true ] || [ -n "${CI:-}" ]; then
-        fail "Falta conectar sua conta GitHub. O Codex deve iniciar o login permitido e orientar a confirmacao no navegador."
+        fail "Falta conectar sua conta GitHub. Execute gh auth login em um terminal interativo e conclua a confirmacao no navegador."
       fi
       printf '%s\n' "Conecte sua conta GitHub no navegador e autorize o acesso aos projetos Avanti. Vou continuar depois da confirmacao."
       gh auth login --hostname github.com --git-protocol https --web \
-        || fail "A conexao com o GitHub nao terminou. O Codex deve identificar qual confirmacao falta antes de continuar."
+        || fail "A conexao com o GitHub nao terminou. Identifique qual confirmacao falta antes de continuar."
     fi
     private_git -C "$INSIGHTS_DEST" fetch --depth 1 origin "$INSIGHTS_REF"
     private_git -C "$INSIGHTS_DEST" checkout --detach -q "$INSIGHTS_REF"
@@ -249,7 +220,7 @@ start_stack() {
   INSIGHTS_WEB_PORT="$(value LOCAL_WEB_PORT "$INSIGHTS_ROOT/.local/compose.env")"
   curl --fail --silent --show-error --max-time 30 "http://127.0.0.1:$INSIGHTS_WEB_PORT/login" -o /dev/null
   printf '%s\n' "Interface: http://localhost:$INSIGHTS_WEB_PORT" "Usuario e senha: $INSIGHTS_ROOT/.local/access.txt"
-  printf '%s\n' "Atalhos para o Codex: $INSIGHTS_ROOT/.local/codex-projects.html"
+  printf '%s\n' "Pastas dos aplicativos: $INSIGHTS_ROOT/sources/frontend e $INSIGHTS_ROOT/sources/backend"
   if [ "$INSIGHTS_NO_BROWSER" = false ]; then
     case "$(uname -s)" in
       Darwin) open "http://localhost:$INSIGHTS_WEB_PORT" || printf '%s\n' "A interface esta pronta; abra o endereco acima no navegador.";;
@@ -294,7 +265,6 @@ case "$INSIGHTS_COMMAND" in
     progress "Avanti Insights pronto. Interface, login, workers e Hub verificados.";;
   start) select_docker; start_stack;;
   stop) select_docker; compose down --remove-orphans;;
-  codex) open_codex;;
   status)
     select_docker
     compose ps

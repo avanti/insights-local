@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('setup', 'start', 'stop', 'status', 'doctor', 'codex', 'help')]
+    [ValidateSet('setup', 'start', 'stop', 'status', 'doctor', 'help')]
     [string]$Command = 'help',
     [string]$Root,
     [ValidateRange(1024, 65535)]
@@ -10,9 +10,7 @@ param(
     [ValidateRange(1024, 65535)]
     [int]$ApiPort,
     [switch]$NoBrowser,
-    [switch]$NonInteractive,
-    [ValidateSet('frontend', 'backend', 'all')]
-    [string]$Project = 'all'
+    [switch]$NonInteractive
 )
 $ErrorActionPreference = 'Stop'
 $script:DockerContext = $env:INSIGHTS_DOCKER_CONTEXT
@@ -27,29 +25,10 @@ $Root = [IO.Path]::GetFullPath($Root)
 
 function Show-Usage {
     Write-Host 'Avanti Insights local'
-    Write-Host '.\scripts\local.ps1 <setup|start|stop|status|doctor|codex|help>'
+    Write-Host '.\scripts\local.ps1 <setup|start|stop|status|doctor|help>'
     Write-Host 'Opcoes: -Root PASTA -Port 3000 -ApiPort 8000 -NoBrowser -NonInteractive'
     Write-Host 'setup instala dependencias, clona os projetos e solicita sources/backend/.env antes de iniciar os servicos.'
     Write-Host 'Os outros comandos nao instalam software.'
-    Write-Host 'codex -Project frontend|backend|all abre as pastas no Codex (padrao all).'
-    Write-Host 'Confira o cadastro dos projetos na barra lateral do aplicativo.'
-}
-
-function Open-Codex {
-    $links = @()
-    foreach ($name in @('frontend', 'backend')) {
-        if ($Project -ne 'all' -and $Project -ne $name) { continue }
-        $link = Join-Path $Root (".local\codex\$name.link")
-        if (-not (Test-Path $link)) { throw 'Atalhos Codex ausentes. Execute setup novamente na mesma pasta.' }
-        if (-not (Test-Path (Join-Path $Root "sources\$name\.git") -PathType Container)) {
-            throw "Pasta do aplicativo $name ausente. Execute setup."
-        }
-        $url = [IO.File]::ReadAllText($link).Trim()
-        if ($url -cnotmatch '^codex://new\?path=[a-zA-Z0-9%._~-]+$') { throw 'Atalho Codex invalido. Execute setup novamente.' }
-        $links += $url
-    }
-    foreach ($url in $links) { Start-Process -FilePath $url }
-    Write-Host 'Solicitada a abertura das pastas no Codex. Confira se aparecem como projetos na barra lateral.'
 }
 
 function Invoke-Native {
@@ -87,7 +66,7 @@ function Install-Package {
     # Package prompts remain visible; Docker terms are completed in its own app.
     & winget $Operation --exact --id $Id --source winget --accept-source-agreements
     if ($LASTEXITCODE -eq 3010) {
-        throw 'A instalacao requer reinicializacao. Reinicie o computador e diga continuar ao Codex para retomar.'
+        throw 'A instalacao requer reinicializacao. Reinicie o computador e execute setup novamente para retomar.'
     }
     if ($LASTEXITCODE -ne 0) { throw "Instalacao de $Id interrompida (codigo $LASTEXITCODE)." }
     Refresh-Path
@@ -126,7 +105,7 @@ function Install-Dependencies {
         if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) {
             throw "Configuracao do WSL interrompida (codigo $($process.ExitCode))."
         }
-        throw 'Conclua a preparacao do Windows e reinicie se solicitado. Depois diga continuar ao Codex para retomar na mesma pasta.'
+        throw 'Conclua a preparacao do Windows e reinicie se solicitado. Depois execute setup novamente na mesma pasta para retomar.'
     }
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { Install-Package 'Docker.DockerDesktop' }
     if (-not (Test-Docker $script:DockerContext)) {
@@ -140,7 +119,7 @@ function Install-Dependencies {
             if (Test-Docker $script:DockerContext) { return }
             Start-Sleep -Seconds 5
         }
-        throw 'Conclua a janela do Docker e diga continuar ao Codex para retomar.'
+        throw 'Conclua a janela do Docker e execute setup novamente para retomar.'
     }
 }
 
@@ -181,7 +160,7 @@ function Invoke-Docker {
 function Ensure-Checkout {
     foreach ($file in @('scripts/bootstrap_local.py', 'scripts/macos.sh', 'scripts/macos-askpass.sh', 'templates/nginx.conf', 'compose.local.yml', 'sources.lock')) {
         if (-not (Test-Path (Join-Path $Root $file) -PathType Leaf)) {
-            throw "Repositorio incompleto: falta $file. O Codex deve usar o clone completo do insights-local, preservando esta pasta."
+            throw "Repositorio incompleto: falta $file. Use o clone completo do insights-local, preservando esta pasta."
         }
     }
 }
@@ -189,7 +168,7 @@ function Ensure-Checkout {
 function Assert-BackendEnv {
     $backendEnv = Join-Path $Root 'sources\backend\.env'
     if (-not (Test-Path $backendEnv -PathType Leaf)) {
-        throw 'Antes de iniciar os servicos, crie sources/backend/.env copiando sources/backend/.env.example e preenchendo as configuracoes privadas localmente. Nao cole chaves ou senhas no chat do Codex. Depois execute setup novamente.'
+        throw 'Antes de iniciar os servicos, crie sources/backend/.env copiando sources/backend/.env.example e preenchendo as configuracoes privadas localmente. Nao cole chaves ou senhas em chats de assistentes de IA. Depois execute setup novamente.'
     }
     Protect-LocalFiles
 }
@@ -235,7 +214,7 @@ function Ensure-Source {
         $authenticated = $LASTEXITCODE -eq 0
         $ErrorActionPreference = $savedPreference
         if (-not $authenticated) {
-            if ($NonInteractive -or $env:CI) { throw 'Falta conectar sua conta GitHub. O Codex deve iniciar o login permitido e orientar a confirmacao no navegador.' }
+            if ($NonInteractive -or $env:CI) { throw 'Falta conectar sua conta GitHub. Execute gh auth login em um terminal interativo e conclua a confirmacao no navegador.' }
             Write-Host 'Conecte sua conta GitHub no navegador e autorize o acesso aos projetos Avanti. Vou continuar depois da confirmacao.'
             Invoke-Native 'gh' @('auth', 'login', '--hostname', 'github.com', '--git-protocol', 'https', '--web')
         }
@@ -280,13 +259,12 @@ function Start-Stack {
     Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$webPort/login" -TimeoutSec 30 | Out-Null
     Write-Host "Interface: http://localhost:$webPort"
     Write-Host ('Usuario e senha: ' + (Join-Path $Root '.local\access.txt'))
-    Write-Host ('Atalhos para o Codex: ' + (Join-Path $Root '.local\codex-projects.html'))
+    Write-Host ('Pastas dos aplicativos: ' + (Join-Path $Root 'sources\frontend') + ' e ' + (Join-Path $Root 'sources\backend'))
     if (-not $NoBrowser) { Start-Process "http://localhost:$webPort" }
 }
 
 try {
     if ($Command -eq 'help') { Show-Usage; exit 0 }
-    if ($Command -ne 'codex' -and $Project -ne 'all') { throw 'Use codex para selecionar um projeto.' }
     if ($Command -ne 'setup' -and ($Port -or $ApiPort)) { throw 'Use setup para alterar portas.' }
     switch ($Command) {
         'setup' {
@@ -313,7 +291,6 @@ try {
         }
         'start' { Select-Docker; Start-Stack }
         'stop' { Select-Docker; Invoke-Compose @('down', '--remove-orphans') }
-        'codex' { Open-Codex }
         'status' {
             Select-Docker
             Invoke-Compose @('ps')
@@ -343,9 +320,9 @@ try {
     if ($Command -eq 'setup' -and $script:SetupStage) {
         try {
             [IO.File]::WriteAllText((Join-Path $Root '.local/setup-progress.txt'), "Etapa: $script:SetupStage`nPasta: $Root`nResultado: interrompido`n")
-            Write-Host 'O Codex pode retomar na mesma pasta. A etapa foi registrada em .local/setup-progress.txt.'
+            Write-Host 'Execute setup novamente na mesma pasta para retomar. A etapa foi registrada em .local/setup-progress.txt.'
         } catch {
-            Write-Host 'Nao foi possivel salvar a etapa. O Codex pode retomar usando a mesma pasta.'
+            Write-Host 'Nao foi possivel salvar a etapa. Execute setup novamente na mesma pasta para retomar.'
         }
     }
     Write-Host $setupError -ForegroundColor Red

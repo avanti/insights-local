@@ -10,15 +10,17 @@ privados. Não existe modo de demonstração. O setup instala as dependências l
 clona os dois projetos e só inicia os serviços depois de validar o arquivo privado
 `sources/backend/.env`.
 
-## Começar pelo Codex
+## Começar com um agente de IA
 
-O computador precisa ter o Codex instalado, acesso à internet, permissão para usar
+O computador precisa ter um agente de IA para programação com acesso ao terminal
+e aos arquivos locais, acesso à internet, permissão para usar
 os repositórios privados Avanti indicados em `sources.lock` e acesso seguro às
 configurações de integração do backend. Git, Docker, Docker Compose, Python e Node
 não precisam estar instalados previamente. A instalação pode solicitar confirmação
 do sistema, autorização de administrador, login GitHub ou reinicialização.
 
-Copie este pedido para uma conversa **local** no Codex:
+Copie este pedido para uma conversa **local** do agente, com acesso ao terminal
+deste computador:
 
 > Instale e configure o Avanti Insights neste computador até a interface local
 > estar pronta para uso com as integrações reais. Trabalhe com a maior autonomia
@@ -30,8 +32,22 @@ Copie este pedido para uma conversa **local** no Codex:
 > Git, se estiver ausente, pelo gerenciador oficial do sistema e confirme que o
 > comando funciona.
 >
+> Antes de clonar os aplicativos, confira se `git config --global user.name` e
+> `git config --global user.email` já estão definidos. Preserve qualquer valor
+> existente. Se algum estiver ausente, explique que esses dados identificam a
+> autoria dos commits feitos neste computador e não servem para autenticar no
+> GitHub; pergunte somente o valor que falta e execute o comando correspondente,
+> substituindo o texto entre aspas pelo valor que eu informar:
+>
+> - `git config --global user.name "Nome informado pelo usuário"`
+> - `git config --global user.email "email informado pelo usuário"`
+>
+> Nunca configure esses exemplos literalmente. Se eu preferir não configurar
+> agora, continue a instalação e avise que commits futuros podem exigir essa
+> configuração.
+>
 > No macOS, se o Git estiver ausente, execute `/usr/bin/xcode-select --install`
-> pelas ferramentas locais do Codex. Não me peça para abrir o Terminal nem copiar
+> pelas ferramentas locais do agente. Não me peça para abrir o Terminal nem copiar
 > comandos. Oriente-me apenas a confirmar a instalação das Xcode Command Line
 > Tools na janela do macOS. Continue acompanhando até `git` funcionar. O aplicativo
 > Xcode completo não é necessário.
@@ -59,8 +75,8 @@ Copie este pedido para uma conversa **local** no Codex:
 > use o fluxo Homebrew para as instalações. Não abra páginas para baixar Docker
 > nem peça que eu monte DMGs ou arraste aplicativos.
 >
-> Conduza o login GitHub pelo navegador quando necessário. Use o terminal
-> interativo do Codex para iniciar o login. Nunca peça senha, código MFA, token ou
+> Conduza o login GitHub pelo navegador quando necessário. Use um terminal
+> interativo para iniciar o login. Nunca peça senha, código MFA, token ou
 > chave de API no chat. Se algo falhar, consulte o erro original e os diagnósticos
 > locais antes de me orientar: `.local/setup-progress.txt` e, no macOS,
 > `.local/install-macos.log`. Não contorne uma rejeição da revisão automática.
@@ -71,18 +87,15 @@ Copie este pedido para uma conversa **local** no Codex:
 > localhost no navegador e verifique o login com as ferramentas disponíveis.
 > Não execute análises pagas apenas para concluir a instalação.
 >
-> Depois execute `./scripts/local.ps1 codex` no Windows ou
-> `bash scripts/local.sh codex` no macOS/Linux para abrir frontend e backend no
-> Codex. Confira se as duas pastas aparecem na barra lateral. Abrir o link não
-> comprova cadastro permanente; se necessário, mostre os caminhos de
-> `.local/codex-projects.json` e oriente-me a usar Criar projeto. Ao terminar,
-> mostre o link do localhost e as integrações que ainda exigem configuração.
+> Ao terminar, mostre o link do localhost, os caminhos do frontend e do backend
+> registrados em `.local/projects.json` e as integrações que ainda exigem
+> configuração.
 
 A pasta da instalação deve ser permanente, fora de `/tmp` e de diretórios
 temporários. Se houver reinicialização ou interrupção, diga **continuar** na mesma
 conversa. Depois de criar o `.env`, execute setup novamente na mesma pasta. Os
 scripts preservam o banco, o primeiro acesso e os checkouts existentes, inclusive
-código modificado pelo Codex.
+código modificado localmente.
 
 ## Arquivo privado do backend
 
@@ -94,7 +107,7 @@ serviços. Copie o exemplo que vem no repositório privado do backend:
 - Windows PowerShell: `Copy-Item sources/backend/.env.example sources/backend/.env`
 
 Preencha o `.env` localmente com os valores fornecidos pela Avanti por um canal
-seguro. Não use o chat do Codex para transportar segredos. A proteção do arquivo
+seguro. Não use chats de assistentes de IA para transportar segredos. A proteção do arquivo
 é aplicada pelo launcher: permissão `600` em macOS/Linux e ACLs restritas no
 Windows. O próprio repositório também ignora arquivos `.env`.
 
@@ -143,8 +156,8 @@ nem provisiona serviços externos.
   Installer/`winget`. O script instala Git, GitHub CLI e Docker Desktop e prepara
   WSL quando necessário. Os termos do Docker e a reinicialização precisam ser
   confirmados localmente quando solicitados.
-- **macOS:** versão compatível com Docker Desktop e Homebrew. O Codex inicia as
-  Command Line Tools da Apple quando necessárias; elas fornecem o Git. O script
+- **macOS:** versão compatível com Docker Desktop e Homebrew. As Command Line
+  Tools da Apple são instaladas quando necessárias; elas fornecem o Git. O script
   prepara Homebrew, instala GitHub CLI e Docker Desktop por Brew e acompanha a
   primeira abertura do Docker. Não é necessário instalar o Xcode completo.
 - **Linux:** instalação automática em Ubuntu, Debian e Fedora. Docker Engine,
@@ -172,7 +185,6 @@ bash scripts/local.sh doctor
 bash scripts/local.sh start
 bash scripts/local.sh stop
 bash scripts/local.sh status
-bash scripts/local.sh codex
 ```
 
 Windows:
@@ -183,22 +195,20 @@ Windows:
 .\scripts\local.ps1 start
 .\scripts\local.ps1 stop
 .\scripts\local.ps1 status
-.\scripts\local.ps1 codex
 ```
 
 - `setup` instala dependências, clona os aplicativos, espera o `.env`, configura
   e inicia. Se faltar o arquivo, crie-o como indicado e execute setup novamente.
+  Os caminhos absolutos dos aplicativos ficam em `.local/projects.json`.
 - `start` valida que o `.env` existe e reutiliza a configuração privada existente.
 - `stop` para somente esta stack e preserva volumes e arquivos.
 - `status` mostra os serviços e o endereço local.
 - `doctor` verifica Compose, sessão local, workers e acesso autenticado ao Hub; não
   dispara análises.
-- `codex` abre as pastas dos aplicativos usando os atalhos do host. Confirme no
-  aplicativo Codex se elas também foram cadastradas como projetos.
 
-No Bash, use `--root`, `--port`, `--api-port`, `--no-browser`,
-`--non-interactive` e `--project frontend|backend|all`. No Windows, os equivalentes
-são `-Root`, `-Port`, `-ApiPort`, `-NoBrowser`, `-NonInteractive` e `-Project`.
+No Bash, use `--root`, `--port`, `--api-port`, `--no-browser` e
+`--non-interactive`. No Windows, os equivalentes são `-Root`, `-Port`, `-ApiPort`,
+`-NoBrowser` e `-NonInteractive`.
 Portas mudam por setup. Não há opção de modo demo.
 
 As configurações opcionais de ambiente são `INSIGHTS_DOCKER_CONTEXT`, para
@@ -227,8 +237,8 @@ reiniciar containers. O backend monta `sources/backend/app` e usa Uvicorn com
 reload/polling. No Docker Desktop, a sincronização pode levar alguns segundos.
 
 Código de tarefas Celery já carregadas exige reiniciar `worker` e
-`playwright_worker`; dependências e Dockerfiles exigem reconstrução. O Codex deve
-identificar o serviço afetado e preservar o banco. Não execute `down -v`.
+`playwright_worker`; dependências e Dockerfiles exigem reconstrução. Reinicie
+apenas o serviço afetado e preserve o banco. Não execute `down -v`.
 
 `sources.lock` fixa versões aprovadas para novos clones. Setup não faz pull,
 reset ou checkout em repositórios já instalados. Checkouts alterados ou em outra

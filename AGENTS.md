@@ -40,8 +40,19 @@ Este repositorio público prepara dois aplicativos privados da organização Ava
   pessoa quando exigidos.
 - Se o Git estiver ausente, instale-o pelo mecanismo oficial do sistema e confirme
   que git funciona antes de clonar este repositório, conforme o prompt no README.
+- Antes de clonar os aplicativos, verifique se `git config --global user.name` e
+  `git config --global user.email` estão definidos. Preserve os valores
+  existentes. Se faltar algum, explique que nome e email identificam a autoria
+  dos commits nesta máquina, não autenticam no GitHub e valem para todos os
+  repositórios do usuário; pergunte apenas o que falta e execute o comando
+  correspondente, substituindo o exemplo pelo valor informado:
+  - `git config --global user.name "..."`
+  - `git config --global user.email "..."`
+  Nunca use placeholders literalmente. Se a pessoa preferir não configurar agora,
+  prossiga com a instalação e avise que commits futuros podem exigir essa
+  configuração.
 - No macOS, execute /usr/bin/xcode-select --install pelas ferramentas locais do
-  Codex quando o Git estiver indisponível. Não delegue à pessoa a abertura do
+  agente quando o Git estiver indisponível. Não delegue à pessoa a abertura do
   Terminal nem a cópia de comandos. Peça apenas as confirmações da janela do macOS,
   acompanhe a instalação e confirme /usr/bin/git --version antes de continuar.
   Use as Xcode Command Line Tools; o aplicativo Xcode completo não é necessário.
@@ -49,18 +60,12 @@ Este repositorio público prepara dois aplicativos privados da organização Ava
 - Se as portas estiverem ocupadas, escolha portas livres com as ferramentas do
   sistema e repita setup com os parâmetros de porta. Não pare outros aplicativos.
   Ao concluir, abra o localhost e o acesso local no editor. Se o navegador estiver
-  disponível, verifique o login sem mostrar a senha no chat. A interface deve ficar
-  acessível mesmo que o cadastro dos projetos na barra lateral do Codex dependa de
-  uma etapa manual posterior.
-- Quando a pessoa solicitar abrir ou adicionar os aplicativos ao Codex, use
-  scripts/local.ps1 codex ou bash scripts/local.sh codex depois de setup. Os links
-  e caminhos absolutos estão em .local/codex-projects.json; a página
-  .local/codex-projects.html e os atalhos nativos oferecem a mesma abertura.
-  Verifique, com list_projects quando disponível, se as duas pastas já estão
-  cadastradas como projetos. Abrir uma conversa por link não confirma o cadastro.
-  Se não houver ferramenta para cadastrar uma pasta, informe os caminhos completos
-  e oriente a pessoa a usar Criar projeto. Não altere bancos ou arquivos internos
-  do Codex para forçar o cadastro.
+  disponível, verifique o login sem mostrar a senha no chat.
+- Os caminhos absolutos do frontend e do backend no computador ficam em
+  .local/projects.json, gerado pelo setup. Quando a pessoa pedir para abrir os
+  aplicativos no editor ou na ferramenta que estiver usando, informe esses
+  caminhos. Não altere bancos ou arquivos internos de outras ferramentas para
+  cadastrar projetos.
 - O frontend roda em modo de desenvolvimento com sources/frontend montada no
   container e atualização automática de arquivos. Depois de alterar componentes
   ou estilos, aguarde a recarga do Next.js ou atualize a página; não reinicie os
@@ -101,7 +106,7 @@ Este repositorio público prepara dois aplicativos privados da organização Ava
 Estas regras se aplicam quando a solicitação envolve `avanti-insights-ai` ou
 `backend-insights`, incluindo código, documentação, testes, dependências e
 configuração. O instalador `insights-local` é um repositório separado. Localize
-os caminhos reais dos dois aplicativos por `.local/codex-projects.json` e
+os caminhos reais dos dois aplicativos por `.local/projects.json` e
 confirme cada raiz Git; não presuma que os clones estão dentro de `sources/`.
 
 ### Estado local, atualização e branches
@@ -110,10 +115,10 @@ confirme cada raiz Git; não presuma que os clones estão dentro de `sources/`.
   `git status --short` dos dois aplicativos, mesmo se o pedido mencionar apenas
   um. Identifique mudanças staged, unstaged e arquivos não rastreados. Resuma os
   caminhos e o tipo de mudança ao usuário; não mostre valores de segredos.
-- Se houver alterações locais que não pertençam ao trabalho ativo do Codex,
+- Se houver alterações locais que não pertençam ao trabalho ativo do agente,
   pare e pergunte ao usuário como tratá-las. Não as descarte, sobrescreva, misture,
   faça stash, commit ou troque de branch sem autorização explícita. Não trate as
-  alterações produzidas pelo Codex na tarefa ativa como trabalho pré-existente:
+  alterações produzidas pelo agente na tarefa ativa como trabalho pré-existente:
   mantenha-as na branch dessa tarefa quando o usuário pedir ajustes relacionados.
 - No primeiro pedido de alteração de uma nova conversa, informe o nome sugerido
   para a branch, em quais repositórios ela será criada e que as duas `main` serão
@@ -129,7 +134,8 @@ confirme cada raiz Git; não presuma que os clones estão dentro de `sources/`.
   criar a branch de trabalho. Faça fetch e avance `main` somente por fast-forward;
   não use reset forçado nem sobrescreva commits locais. Crie a branch de trabalho
   a partir da `main` atualizada do(s) repositório(s) que serão alterados. Use o
-  prefixo `codex/` e um nome curto que descreva a tarefa.
+  prefixo `feature/` para funcionalidades e `fix/` para correções, seguido de um
+  nome curto que descreva a tarefa.
 - Se autenticação, rede, conflito ou divergência impedir a atualização de
   qualquer `main`, pare antes de criar a branch ou alterar os aplicativos.
   Informe qual repositório falhou e o erro confirmado. Só prossiga sem atualizar

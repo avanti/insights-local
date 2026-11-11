@@ -6,7 +6,7 @@ mac_run() {
   shift
   printf '\n[%s] %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S UTC')" "$description" >> "$INSIGHTS_MAC_LOG"
   if "$@" >> "$INSIGHTS_MAC_LOG" 2>&1; then return 0; fi
-  printf '%s\n' "$description nao foi concluido. O Codex pode consultar $INSIGHTS_MAC_LOG e retomar esta etapa." >&2
+  printf '%s\n' "$description nao foi concluido. Consulte $INSIGHTS_MAC_LOG e execute setup novamente para retomar esta etapa." >&2
   return 1
 }
 
@@ -15,7 +15,7 @@ mac_wait() {
   shift
   until "$@" >/dev/null 2>&1; do
     if [ "$attempts" -ge "$INSIGHTS_MAC_WAIT_ATTEMPTS" ]; then
-      printf '%s\n' "$description ainda nao terminou. Conclua a janela aberta e diga continuar ao Codex." >&2
+      printf '%s\n' "$description ainda nao terminou. Conclua a janela aberta e execute setup novamente." >&2
       return 1
     fi
     sleep 5
@@ -28,7 +28,7 @@ mac_git_ready() { xcode-select -p >/dev/null 2>&1 && git --version >/dev/null 2>
 mac_prepare_git() {
   if git --version >/dev/null 2>&1; then return 0; fi
   if [ "$INSIGHTS_NONINTERACTIVE" = true ]; then
-    printf '%s\n' "Falta confirmar a instalacao das ferramentas Apple. Retome com o Codex em modo interativo." >&2
+    printf '%s\n' "Falta confirmar a instalacao das ferramentas Apple. Execute setup novamente em modo interativo." >&2
     return 1
   fi
   printf '%s\n' "Na janela das ferramentas Apple, escolha Instalar e aceite os termos. Vou aguardar e continuar."
@@ -85,7 +85,7 @@ mac_download_verified() {
     --retry 3 --connect-timeout 20 --max-time 900 "$url" -o "$destination" || return 1
   actual="$(shasum -a 256 "$destination" | awk '{print $1}')"
   if [ "$actual" != "$expected" ]; then
-    printf '%s\n' "O download nao passou na verificacao. O Codex deve repetir o download antes de instalar." >&2
+    printf '%s\n' "O download nao passou na verificacao. Repita o download antes de instalar." >&2
     return 1
   fi
 }
@@ -116,7 +116,7 @@ mac_prepare_brew() {
     printf '%s\n' "Este Mac usa uma arquitetura nao suportada pelo instalador." >&2
     return 1
   fi
-  mac_find_brew || { printf '%s\n' "O Homebrew ainda nao esta disponivel. O Codex deve consultar o diagnostico da instalacao." >&2; return 1; }
+  mac_find_brew || { printf '%s\n' "O Homebrew ainda nao esta disponivel. Consulte o diagnostico da instalacao." >&2; return 1; }
 }
 
 mac_docker_ready() {
@@ -140,7 +140,7 @@ install_macos() {
   if [ "$INSIGHTS_MAC_WAIT_ATTEMPTS" -le 0 ] || [ "$INSIGHTS_MAC_WAIT_ATTEMPTS" -gt 1440 ]; then
     fail "Tempo de espera da instalacao invalido."
   fi
-  mac_prepare_git || fail "Falta concluir a instalacao das ferramentas Apple. Diga continuar ao Codex depois de confirmar a janela."
+  mac_prepare_git || fail "Falta concluir a instalacao das ferramentas Apple. Execute setup novamente depois de confirmar a janela."
   local app="" needs_brew=false
   if ! command -v gh >/dev/null 2>&1; then needs_brew=true; fi
   if ! mac_docker_ready || ! docker compose version >/dev/null 2>&1; then
@@ -148,27 +148,27 @@ install_macos() {
   fi
   if [ "$needs_brew" = true ]; then
     mac_prepare_askpass
-    mac_prepare_brew || fail "A preparacao do Homebrew parou. O Codex deve consultar $INSIGHTS_MAC_LOG antes de pedir uma acao."
+    mac_prepare_brew || fail "A preparacao do Homebrew parou. Consulte $INSIGHTS_MAC_LOG antes de pedir uma acao."
     if ! command -v gh >/dev/null 2>&1; then
       printf '%s\n' "Instalando o acesso ao GitHub. Isso acontece automaticamente."
-      mac_run "Instalando GitHub CLI" mac_brew_run install gh || fail "O acesso ao GitHub ainda nao foi instalado. O Codex deve consultar $INSIGHTS_MAC_LOG."
+      mac_run "Instalando GitHub CLI" mac_brew_run install gh || fail "O acesso ao GitHub ainda nao foi instalado. Consulte $INSIGHTS_MAC_LOG."
     fi
     if ! mac_docker_ready || ! docker compose version >/dev/null 2>&1; then
       if ! app="$(mac_docker_app)"; then
         printf '%s\n' "Instalando o Docker pelo Homebrew. Vou baixar e preparar os arquivos automaticamente."
         mac_run "Instalando Docker Desktop" mac_brew_run install --cask --require-sha docker-desktop \
-          || fail "A instalacao do Docker parou. O Codex deve consultar $INSIGHTS_MAC_LOG para identificar o motivo."
-        app="$(mac_docker_app)" || fail "O Homebrew terminou, mas o Docker nao foi localizado. O Codex deve conferir $INSIGHTS_MAC_LOG."
+          || fail "A instalacao do Docker parou. Consulte $INSIGHTS_MAC_LOG para identificar o motivo."
+        app="$(mac_docker_app)" || fail "O Homebrew terminou, mas o Docker nao foi localizado. Confira $INSIGHTS_MAC_LOG."
       fi
     fi
   fi
   if [ -n "$app" ]; then export PATH="$app/Contents/Resources/bin:$PATH"; fi
   if ! mac_docker_ready; then
-    if [ "$INSIGHTS_NONINTERACTIVE" = true ]; then fail "Falta concluir a primeira abertura do Docker. Retome com o Codex em modo interativo."; fi
+    if [ "$INSIGHTS_NONINTERACTIVE" = true ]; then fail "Falta concluir a primeira abertura do Docker. Execute setup novamente em modo interativo."; fi
     app="${app:-$(mac_docker_app)}"
-    mac_run "Abrindo Docker Desktop" open "$app" || fail "O Docker nao abriu. O Codex deve consultar o diagnostico em $INSIGHTS_MAC_LOG."
+    mac_run "Abrindo Docker Desktop" open "$app" || fail "O Docker nao abriu. Consulte o diagnostico em $INSIGHTS_MAC_LOG."
     printf '%s\n' "Na janela do Docker, aceite os termos se concordar. Vou aguardar a inicializacao e continuar."
-    mac_wait "A configuracao inicial do Docker" mac_docker_ready || fail "Conclua a janela do Docker e diga continuar ao Codex."
+    mac_wait "A configuracao inicial do Docker" mac_docker_ready || fail "Conclua a janela do Docker e execute setup novamente."
   fi
   printf '%s\n' "Ferramentas prontas. Vou preparar os projetos e abrir o Avanti Insights."
 }
