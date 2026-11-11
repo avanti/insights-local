@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium ca-certificates fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY sources/frontend/package.json sources/frontend/package-lock.json ./
+COPY sources/frontend/package.json sources/frontend/package-lock.json sources/frontend/.npmrc ./
 RUN npm ci
 COPY sources/frontend/ ./
 EXPOSE 3000
