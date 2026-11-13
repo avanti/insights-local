@@ -164,6 +164,21 @@ confirme cada raiz Git; não presuma que os clones estão dentro de `sources/`.
   código/documentação e proponha como estendê-lo antes de escolher uma arquitetura
   diferente.
 
+### GA4
+
+- No backend, o servidor MCP oficial do GA4 (`analytics-mcp`, aberto por
+  `app/integrations/ga4_mcp.py`) é usado somente pelo objetivo G.A.B.I., em que o
+  modelo escolhe as consultas. Não use esse MCP em nenhum outro objetivo, painel,
+  script ou endpoint.
+- Qualquer outra consulta ao GA4 é feita pelo Avanti Hub: as rotas
+  `/api/analytics/*` ou, para relatório sob medida, `POST /api/analytics/report`
+  (no backend, `HubGa4Reporter` em `app/integrations/ga4_hub_reports.py`). O Hub
+  aplica o limite de consultas simultâneas por cliente, o prazo, o cache e a cota
+  do GA4 que todos dividem; uma consulta direta pelo MCP fura esses limites.
+- Se o Hub não tiver o que a consulta precisa, não use o MCP como alternativa:
+  siga a regra de limites de Labs abaixo e descreva a rota que falta para a equipe
+  de Labs criar.
+
 ### Verificação de fatos e limites de Labs
 
 - Não invente nem presuma endpoints, campos, permissões, variáveis, efeitos de
