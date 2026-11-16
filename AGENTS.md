@@ -4,6 +4,15 @@ Este repositorio público prepara dois aplicativos privados da organização Ava
 
 - Leia README.md antes de iniciar. Use scripts/local.ps1 no Windows e
   scripts/local.sh no macOS/Linux. O primeiro comando é setup.
+- Antes de instalar, retomar a instalação ou começar uma tarefa nos aplicativos,
+  atualize este repositório `insights-local`: confira a branch e
+  `git status --short`, faça `git fetch origin` e avance `main` somente por
+  fast-forward a partir de `origin/main`. Se outra branch estiver em uso, houver
+  commits locais divergentes, o Git recusar o fast-forward por causa de
+  alterações locais ou rede/autenticação falharem, não faça reset, stash nem
+  troca de branch: informe o estado e o erro e pergunte como prosseguir. Depois
+  de atualizar, releia AGENTS.md e README.md, pois as regras podem ter mudado.
+  setup não atualiza este repositório nem os aplicativos já clonados.
 - Conduza a pessoa até a interface local. Use português e mensagens curtas sobre
   a etapa atual. Execute os comandos e downloads; a pessoa só deve concluir as
   confirmações necessárias. Não delegue a instalação inteira por uma falha genérica.
@@ -111,7 +120,8 @@ confirme cada raiz Git; não presuma que os clones estão dentro de `sources/`.
 
 ### Estado local, atualização e branches
 
-- Antes de começar uma nova tarefa de alteração, confira a branch e
+- Antes de começar uma nova tarefa de alteração, atualize o `insights-local`
+  conforme a regra do início deste arquivo. Depois confira a branch e
   `git status --short` dos dois aplicativos, mesmo se o pedido mencionar apenas
   um. Identifique mudanças staged, unstaged e arquivos não rastreados. Resuma os
   caminhos e o tipo de mudança ao usuário; não mostre valores de segredos.
