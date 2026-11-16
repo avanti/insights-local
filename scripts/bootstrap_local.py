@@ -174,6 +174,10 @@ def configure(root: Path, port: int | None = None, api_port: int | None = None,
         "MERCHANT_MCP_ENABLED": credentials.get("MERCHANT_MCP_ENABLED") or "false",
         "JOBBER_MCP_ENABLED": credentials.get("JOBBER_MCP_ENABLED") or "false",
         "GITHUB_MCP_ENABLED": credentials.get("GITHUB_MCP_ENABLED") or "false",
+        # The backend enables these by default; locally they would post global VTEX
+        # alerts to the real Slack channel or start paid news runs without a request.
+        "VTEX_STATUS_SLACK_ENABLED": credentials.get("VTEX_STATUS_SLACK_ENABLED") or "false",
+        "NEWS_AUTOGEN_ENABLED": credentials.get("NEWS_AUTOGEN_ENABLED") or "false",
     }
     frontend = {
         **{
@@ -251,6 +255,9 @@ async def seed_database() -> None:
     if len(password) < 12:
         raise RuntimeError("Senha local deve ter pelo menos 12 caracteres.")
     await connect_db()
+    added = await add_missing_columns(engine)
+    if added:
+        print("Banco local atualizado para o backend atual. Colunas adicionadas: " + ", ".join(added))
     review_seed_exists = True
     if seed_review_app is not None:
         async with AsyncSessionLocal() as db:
@@ -313,7 +320,114 @@ async def seed_database() -> None:
             f"clientes={summary.customers}, historicos={summary.histories}, "
             f"resumos={summary.summaries}, tarefas de exemplo inativas."
         )
+    paused = await pause_new_customer_routines()
+    if paused:
+        print(f"Rotinas automaticas de clientes criadas pausadas no banco local: {paused}. "
+              "Ative-as na tela de agendamentos se precisar.")
     print("Banco local preparado. Usuario disponivel: " + LOCAL_ADMIN_EMAIL)
+
+
+def missing_column_plan(tables, existing_columns: dict[str, set[str]]) -> tuple[list, list[str]]:
+    """Split columns absent from existing tables into addable and blocked ones."""
+    addable, blocked = [], []
+    for table in tables:
+        have = existing_columns.get(table.name)
+        if have is None:
+            continue
+        for column in table.columns:
+            if column.name in have:
+                continue
+            if column.nullable or column.server_default is not None:
+                addable.append(column)
+            else:
+                blocked.append(f"{table.name}.{column.name}")
+    return addable, blocked
+
+
+async def add_missing_columns(engine) -> list[str]:
+    """Bring a local database created by an older backend up to the current models.
+
+    This stack has no Alembic history and create_all only creates missing tables, so
+    a newer backend fails on columns added to tables that already exist. Only safe,
+    additive changes are made: nullable columns or columns with a server default,
+    followed by the unique constraints and indexes that use them. Nothing is
+    dropped or retyped. Other cases stop before any change, naming only columns.
+    """
+    from sqlalchemy import UniqueConstraint, inspect, text
+    from sqlalchemy.schema import AddConstraint, CreateColumn
+    from app.models.models import Base
+
+    def sync(conn) -> list[str]:
+        inspector = inspect(conn)
+        names = set(inspector.get_table_names())
+        tables = [table for table in Base.metadata.sorted_tables if table.name in names]
+        existing = {table.name: {c["name"] for c in inspector.get_columns(table.name)} for table in tables}
+        addable, blocked = missing_column_plan(tables, existing)
+        if blocked:
+            raise RuntimeError(
+                "O banco local foi criado por um backend anterior e estas colunas obrigatorias "
+                "nao tem valor padrao: " + ", ".join(blocked) + ". Nenhuma alteracao foi feita no banco."
+            )
+        if not addable:
+            return []
+        preparer = conn.dialect.identifier_preparer
+        for column in addable:
+            spec = CreateColumn(column).compile(dialect=conn.dialect)
+            conn.execute(text(f"ALTER TABLE {preparer.format_table(column.table)} ADD COLUMN IF NOT EXISTS {spec}"))
+        added = {(column.table.name, column.name) for column in addable}
+        for table in {column.table for column in addable}:
+            uses_added = lambda cols: any((table.name, col.name) in added for col in cols)  # noqa: E731
+            known = ({c["name"] for c in inspector.get_unique_constraints(table.name)}
+                     | {i["name"] for i in inspector.get_indexes(table.name)})
+            for constraint in table.constraints:
+                if (isinstance(constraint, UniqueConstraint) and constraint.name
+                        and constraint.name not in known and uses_added(constraint.columns)):
+                    conn.execute(AddConstraint(constraint))
+            for index in table.indexes:
+                if index.name not in known and uses_added(index.columns):
+                    index.create(conn, checkfirst=True)
+        return sorted(f"{table}.{column}" for table, column in added)
+
+    async with engine.begin() as conn:
+        # Same lock as the backend's startup bootstrap, so they never interleave.
+        await conn.execute(text("SELECT pg_advisory_xact_lock(874235, 1)"))
+        return await conn.run_sync(sync)
+
+
+async def pause_new_customer_routines() -> int:
+    """Create the backend's automatic customer routines paused in this local stack.
+
+    Newer backends provision active Market Radar, Pulse and site performance routines
+    for every active customer, including the synthetic ones, and those routines call
+    real AI and Hub services. Provisioning them here, before the scheduler starts,
+    lets the deterministic IDs keep them paused; schedules that already exist are
+    never changed, so a routine someone turned on stays on.
+    """
+    try:
+        from app.scheduler.recurring import provision_schedules
+    except ModuleNotFoundError as exc:
+        if exc.name not in {"app.scheduler.recurring", "app.scheduler"}:
+            raise
+        return 0
+    from sqlalchemy import select, update
+    from app.core.db import AsyncSessionLocal, engine
+    from app.models.models import ScheduledTask
+
+    async with AsyncSessionLocal() as db:
+        known = set(await db.scalars(select(ScheduledTask.id)))
+        await provision_schedules(db)
+        created = set(await db.scalars(select(ScheduledTask.id))) - known
+        paused = 0
+        if created:
+            result = await db.execute(update(ScheduledTask).where(
+                ScheduledTask.id.in_(created),
+                ScheduledTask.customerId.is_not(None),
+                ScheduledTask.isActive.is_(True),
+            ).values(isActive=False))
+            paused = result.rowcount or 0
+        await db.commit()
+    await engine.dispose()
+    return paused
 
 
 def serve() -> None:

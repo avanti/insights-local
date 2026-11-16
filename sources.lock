@@ -1,5 +1,5 @@
 # Approved application revisions; setup never updates existing checkouts silently.
 BACKEND_REPOSITORY=avanti/avanti-synapse
-BACKEND_REF=4211827a2ddadc8b48fa2fe3ff1109a2878b6bae
+BACKEND_REF=185b858c7bbed10516e0ec19a3a37185e0ca3a13
 FRONTEND_REPOSITORY=avanti/avanti-insights-ai
-FRONTEND_REF=5625dc7d76627c368083105634d16a00fb18dee6
+FRONTEND_REF=3ca1ca4a98328824cbd3debd96710869774aaf7c
