@@ -16,6 +16,11 @@ bootstrap = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bootstrap)
 
 
+class SimpleTable:
+    def __init__(self, name, columns):
+        self.name, self.columns = name, columns
+
+
 class ConfigurationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -53,6 +58,32 @@ class ConfigurationTests(unittest.TestCase):
         self.assertNotIn("MARKETING_HUB_API_KEY", frontend)
         self.assertNotIn("GA4_CREDENTIALS_PRIVATE_KEY_B64", frontend)
         self.assertEqual(frontend["ANTHROPIC_API_KEY"], self.keys["ANTHROPIC_API_KEY"])
+
+    def test_automatic_slack_and_news_runs_stay_off_unless_enabled(self):
+        self.configure()
+        backend = self.values("backend.env")
+        self.assertEqual(backend["VTEX_STATUS_SLACK_ENABLED"], "false")
+        self.assertEqual(backend["NEWS_AUTOGEN_ENABLED"], "false")
+        enabled = {**self.keys, "VTEX_STATUS_SLACK_ENABLED": "true", "NEWS_AUTOGEN_ENABLED": "true"}
+        bootstrap.private_write(self.root / "sources/backend/.env", bootstrap.env_text(enabled))
+        self.configure()
+        backend = self.values("backend.env")
+        self.assertEqual(backend["VTEX_STATUS_SLACK_ENABLED"], "true")
+        self.assertEqual(backend["NEWS_AUTOGEN_ENABLED"], "true")
+
+    def test_older_local_database_only_receives_safe_additive_columns(self):
+        from types import SimpleNamespace as Column
+        def table(name, *columns):
+            return SimpleTable(name, [Column(name=c[0], nullable=c[1], server_default=c[2]) for c in columns])
+        customer = table("Customer", ("id", False, None), ("flag", False, "false"), ("note", True, None))
+        task = table("Task", ("id", False, None), ("sourceKey", False, None))
+        fresh = table("Fresh", ("id", False, None))
+        addable, blocked = bootstrap.missing_column_plan(
+            [customer, task, fresh], {"Customer": {"id"}, "Task": {"id", "sourceKey"}})
+        self.assertEqual([c.name for c in addable], ["flag", "note"])
+        self.assertEqual(blocked, [])
+        _, blocked = bootstrap.missing_column_plan([task], {"Task": {"id"}})
+        self.assertEqual(blocked, ["Task.sourceKey"])
 
     def test_repeated_setup_preserves_database_and_login_passwords(self):
         self.configure()

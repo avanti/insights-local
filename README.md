@@ -231,6 +231,15 @@ das contas sintéticas é a mesma do administrador local; `.local/access.txt`
 indica onde consultar a lista de usuários. As tarefas agendadas de exemplo ficam
 inativas para não disparar análises reais.
 
+O backend cria rotinas automáticas por cliente (Radar de mercado, Pulse e
+Performance do site), que usam IA e o Hub reais. No banco local, o bootstrap cria
+essas rotinas pausadas antes de o scheduler iniciar, inclusive em bancos já
+existentes que recebem um backend mais novo. Rotinas que já existem não são
+alteradas; ative-as na tela de agendamentos quando precisar. Alertas de status
+VTEX no Slack (`VTEX_STATUS_SLACK_ENABLED`) e a geração automática de novidades
+(`NEWS_AUTOGEN_ENABLED`) ficam desligados, a menos que `sources/backend/.env`
+defina `true`.
+
 O frontend roda Next.js em desenvolvimento com `sources/frontend` montado e
 observação por polling. Mudanças em componentes e estilos recarregam a página sem
 reiniciar containers. O backend monta `sources/backend/app` e usa Uvicorn com

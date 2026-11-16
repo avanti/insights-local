@@ -95,6 +95,10 @@ Este repositorio público prepara dois aplicativos privados da organização Ava
   externas e compartilha a senha local do admin. As tarefas Review — de exemplo
   ficam inativas para não acionarem integrações reais. Checkouts existentes sem
   esse seeder devem ser preservados e informados, não atualizados em silêncio.
+- O bootstrap cria pausadas as rotinas automáticas de clientes do backend (Radar,
+  Pulse, Performance do site) e deixa VTEX_STATUS_SLACK_ENABLED e
+  NEWS_AUTOGEN_ENABLED desligados, salvo `true` explícito no .env. Não ative
+  rotinas nem essas variáveis por iniciativa própria.
 - O banco e Redis são locais, mas Hub, IA, S3, email, Slack, robôs e MCPs usam os
   serviços reais configurados no ambiente. Não declare todos os objetivos
   validados apenas pelo login. O doctor consulta Hub por GET /api/customers e
