@@ -122,6 +122,12 @@ configuração. O instalador `insights-local` é um repositório separado. Local
 os caminhos reais dos dois aplicativos por `.local/projects.json` e
 confirme cada raiz Git; não presuma que os clones estão dentro de `sources/`.
 
+Antes de alterar um aplicativo, leia o `AGENTS.md` da raiz dele e siga suas
+regras (deploy, migrations, segurança, grafo Brain, guia dos objetivos, entre
+outras). Elas valem também quando o trabalho começa por este repositório, porque
+o agente aberto aqui pode não carregar esses arquivos sozinho. Se uma regra deste
+arquivo conflitar com a do aplicativo, vale a do aplicativo.
+
 ### Estado local, atualização e branches
 
 - Antes de começar uma nova tarefa de alteração, atualize o `insights-local`
@@ -135,8 +141,8 @@ confirme cada raiz Git; não presuma que os clones estão dentro de `sources/`.
   alterações produzidas pelo agente na tarefa ativa como trabalho pré-existente:
   mantenha-as na branch dessa tarefa quando o usuário pedir ajustes relacionados.
 - No primeiro pedido de alteração de uma nova conversa, informe o nome sugerido
-  para a branch, em quais repositórios ela será criada e que as duas `main` serão
-  atualizadas; peça confirmação antes de criá-la e não edite os aplicativos antes
+  para a branch, em quais repositórios ela será criada e que as duas `develop`
+  serão atualizadas; peça confirmação antes de criá-la e não edite os aplicativos antes
   de a branch existir. Uma confirmação explícita para criar a branch, dada no
   próprio pedido, já vale. Se a pessoa pedir para continuar uma tarefa/PR existente
   em outra conversa, confirme e reutilize aquela branch. Reutilize a mesma branch
@@ -144,14 +150,21 @@ confirme cada raiz Git; não presuma que os clones estão dentro de `sources/`.
   cada ajuste. Se a tarefa abranger os dois aplicativos, use o mesmo nome de
   branch nos dois. Se afetar apenas um, crie branch somente nele.
 - Depois de resolver o estado local e obter a confirmação da branch, atualize a
-  branch `main` local de ambos os aplicativos a partir de `origin/main` antes de
-  criar a branch de trabalho. Faça fetch e avance `main` somente por fast-forward;
-  não use reset forçado nem sobrescreva commits locais. Crie a branch de trabalho
-  a partir da `main` atualizada do(s) repositório(s) que serão alterados. Use o
-  prefixo `feature/` para funcionalidades e `fix/` para correções, seguido de um
-  nome curto que descreva a tarefa.
+  branch `develop` local de ambos os aplicativos a partir de `origin/develop`
+  (crie-a a partir de `origin/develop` se não existir) antes de criar a branch de
+  trabalho. Faça fetch e avance `develop` somente por fast-forward; não use reset
+  forçado nem sobrescreva commits locais. Crie a branch de trabalho a partir da
+  `develop` atualizada do(s) repositório(s) que serão alterados. Use o prefixo
+  `feature/` para funcionalidades e `fix/` para correções, seguido de um nome
+  curto que descreva a tarefa.
+- A `develop` sempre contém a `main`, por isso o trabalho sai dela. Uma branch
+  criada a partir da `main` deixa de fora o que já entrou na `develop` e ainda não
+  foi publicado: uma migration nova fica com duas pontas depois do merge e adia o
+  deploy, o código pode conflitar ou usar um contrato antigo, e o agente lê regras
+  defasadas. A `main` só é base no fix urgente (ver "Pull requests, produção e
+  merge").
 - Se autenticação, rede, conflito ou divergência impedir a atualização de
-  qualquer `main`, pare antes de criar a branch ou alterar os aplicativos.
+  qualquer `develop`, pare antes de criar a branch ou alterar os aplicativos.
   Informe qual repositório falhou e o erro confirmado. Só prossiga sem atualizar
   se o usuário autorizar isso explicitamente. Antes de prosseguir, explique que a
   alteração partirá de uma revisão antiga e pode não conter correções ou mudanças
@@ -193,6 +206,17 @@ confirme cada raiz Git; não presuma que os clones estão dentro de `sources/`.
   siga a regra de limites de Labs abaixo e descreva a rota que falta para a equipe
   de Labs criar.
 
+### Grafo Brain
+
+- O backend mantém em `app/services/brain_map.json` o mapa de como os objetivos
+  se ligam (o grafo Brain). Objetivo ou rotina nova, ou mudança no que um
+  objetivo lê ou grava, atualiza esse arquivo no mesmo PR do backend.
+- O que conta como ler e gravar, quais partes do mapa mudam e o que não precisa
+  mexer nele estão na seção "Grafo Brain" do `AGENTS.md` do backend. Leia antes de
+  editar o mapa.
+- Antes do PR, rode `python -m unittest tests.test_admin_brain` na raiz do
+  backend.
+
 ### Verificação de fatos e limites de Labs
 
 - Não invente nem presuma endpoints, campos, permissões, variáveis, efeitos de
@@ -211,11 +235,14 @@ confirme cada raiz Git; não presuma que os clones estão dentro de `sources/`.
 
 ### Pull requests, produção e merge
 
-- Se o usuário pedir um PR e não indicar a branch de destino, pergunte se deve
-  ser `develop` ou `main` e explique: `develop` passa pelos testes da equipe e
-  segue para o próximo dia de deploy; `main` não passa pelos testes da equipe e
-  só recebe deploy depois da autorização da gestão. Não escolha o destino pelo
-  usuário. A abertura de PR não autoriza merge.
+- Todo PR dos aplicativos vai para a `develop`, que segue para o próximo deploy
+  automático. A `main` é produção e só muda pelo deploy: nunca abra PR para a
+  `main` nem faça merge nela pelo GitHub, porque isso publica sem o fluxo do
+  deploy. A abertura de PR não autoriza merge.
+- Fix urgente, fora do deploy automático: a branch sai da `main` atualizada e é
+  publicada com `sudo insights-deploy fix <branch>` no servidor de produção. Não
+  precisa de PR. Prepare a branch, suba-a para o GitHub e avise que a publicação
+  precisa de alguém com acesso ao servidor; não tente publicá-la por outro meio.
 - Nunca faça merge automaticamente ao abrir um PR. Informe que o PR ficará
   aberto para revisão; faça merge somente quando o usuário pedir explicitamente.
 - Nunca faça deploy por iniciativa própria. Mesmo quando o usuário pedir
