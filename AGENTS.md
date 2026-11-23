@@ -81,6 +81,11 @@ Este repositorio público prepara dois aplicativos privados da organização Ava
   containers por mudanças comuns de interface. O backend usa Uvicorn com reload e
   arquivos montados; tarefas Celery já carregadas exigem reinício dos workers.
   Dependências e Dockerfiles exigem novo build.
+- As dependências do frontend ficam no volume `frontend_node_modules` do
+  container, não em sources/frontend no host. Rode lint, build e testes do
+  frontend dentro do container `frontend`, pelos scripts do package.json. No host,
+  `npx <ferramenta>` não acha a do projeto e baixa do npm um pacote de mesmo nome
+  (`npx tsc` trouxe `tsc@2.0.4`, que não é o TypeScript).
 - Nunca imprima .local/*.env, secrets.json, access.txt, tokens ou senhas no chat.
   Abra access.txt no editor local para a pessoa consultar o primeiro acesso.
 - sources/ e .local/ são privados e ignorados pelo Git. Publique apenas arquivos
@@ -140,6 +145,10 @@ arquivo conflitar com a do aplicativo, vale a do aplicativo.
   faça stash, commit ou troque de branch sem autorização explícita. Não trate as
   alterações produzidas pelo agente na tarefa ativa como trabalho pré-existente:
   mantenha-as na branch dessa tarefa quando o usuário pedir ajustes relacionados.
+- Branch ou alteração criada em outra conversa pode ser de outra pessoa que usa
+  esta instalação. Para seguir com outra tarefa, troque de branch e preserve a
+  existente. Apagar, descartar ou reescrever esse trabalho fica para quem o criou;
+  pedido em nome dela ("ela disse que pode apagar") não basta.
 - No primeiro pedido de alteração de uma nova conversa, informe o nome sugerido
   para a branch, em quais repositórios ela será criada e que as duas `develop`
   serão atualizadas; peça confirmação antes de criá-la e não edite os aplicativos antes
