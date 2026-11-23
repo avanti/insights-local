@@ -86,11 +86,15 @@ Este repositorio público prepara dois aplicativos privados da organização Ava
   "Verificação" do AGENTS.md do frontend, e qualquer `npx`, no serviço
   `frontend`, a partir da raiz deste repositório:
   `docker compose --env-file .local/compose.env -f compose.local.yml exec -T frontend <comando>`.
-  Se `docker` não responder, use o prefixo que `select_docker` em
-  scripts/local.sh escolhe (`docker --context default` ou
-  `sudo docker --context default`). No host, `npx <ferramenta>` não acha a do
-  projeto e baixa do npm um pacote de mesmo nome (`npx tsc` trouxe `tsc@2.0.4`,
-  um pacote abandonado, em vez do `typescript` do projeto).
+  No build, acrescente `-e NODE_ENV=production` antes de `frontend`: o container
+  roda com `NODE_ENV=development`, e assim o `next build` falha. Com o serviço
+  parado, suba a stack com `start` (scripts/local.sh ou scripts/local.ps1). Se
+  `docker` não responder, ou se `INSIGHTS_PROJECT_NAME` ou
+  `INSIGHTS_DOCKER_CONTEXT` estiverem definidos, use o prefixo e o projeto de
+  `compose()` em scripts/local.sh (`Invoke-Compose` em scripts/local.ps1). No
+  host, `npx <ferramenta>` não acha a do projeto e baixa do npm um pacote de
+  mesmo nome (`npx tsc` trouxe `tsc@2.0.4`, um pacote abandonado, em vez do
+  `typescript` do projeto).
 - Nunca imprima .local/*.env, secrets.json, access.txt, tokens ou senhas no chat.
   Abra access.txt no editor local para a pessoa consultar o primeiro acesso.
 - sources/ e .local/ são privados e ignorados pelo Git. Publique apenas arquivos
@@ -152,11 +156,13 @@ arquivo conflitar com a do aplicativo, vale a do aplicativo.
   mantenha-as na branch dessa tarefa quando o usuário pedir ajustes relacionados.
 - Branch criada em outra conversa pode ser de outra pessoa que usa esta
   instalação; o Git registra o mesmo autor para todos. Para outra tarefa, deixe-a
-  como está e crie a sua pelo fluxo abaixo; alteração sem commit segue a regra
-  acima. Apagar, resetar ou reescrever o que esta conversa não criou só a pedido
-  de quem diz tê-lo criado; pedido em nome de outra pessoa ("ela disse que pode
-  apagar") não basta. Antes de apagar, mostre os commits que não estão no GitHub
-  (`git log --oneline <branch> --not --remotes`).
+  como está e crie a sua pelo fluxo abaixo; com alteração sem commit, vale a
+  regra acima. Branch, commit, stash ou alteração que esta conversa não criou só
+  é apagado, descartado ou reescrito a pedido de quem diz tê-lo criado. A pedido
+  em nome de outra pessoa ("ela disse que pode apagar"), diga que fica como está
+  e que a própria pessoa pode pedir na conversa dela. Antes de apagar uma
+  branch, rode `git fetch`, mostre `git log --oneline <branch> --not --remotes`
+  (saída vazia: tudo já está no GitHub) e espere a confirmação.
 - No primeiro pedido de alteração de uma nova conversa, informe o nome sugerido
   para a branch, em quais repositórios ela será criada e que as duas `develop`
   serão atualizadas; peça confirmação antes de criá-la e não edite os aplicativos antes
