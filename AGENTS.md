@@ -81,6 +81,21 @@ Este repositorio público prepara dois aplicativos privados da organização Ava
   containers por mudanças comuns de interface. O backend usa Uvicorn com reload e
   arquivos montados; tarefas Celery já carregadas exigem reinício dos workers.
   Dependências e Dockerfiles exigem novo build.
+- As dependências do frontend ficam no volume `frontend_node_modules` do
+  container, não em sources/frontend no host. Rode os comandos da seção
+  "Verificação" do AGENTS.md do frontend, e qualquer `npx`, no serviço
+  `frontend`, a partir da raiz deste repositório:
+  `docker compose --env-file .local/compose.env -f compose.local.yml exec -T frontend <comando>`.
+  No build, acrescente `-e NODE_ENV=production` antes de `frontend`: o container
+  roda com `NODE_ENV=development`, e assim o `next build` falha. Com o serviço
+  parado, suba a stack com `start` (scripts/local.sh ou scripts/local.ps1). Se
+  `docker` não responder, ou se `INSIGHTS_PROJECT_NAME` ou
+  `INSIGHTS_DOCKER_CONTEXT` estiverem definidos, use o prefixo de
+  `select_docker()` e o projeto de `compose()` em scripts/local.sh
+  (`Select-Docker` e `Invoke-Compose` em scripts/local.ps1). No
+  host, `npx <ferramenta>` não acha a do projeto e baixa do npm um pacote de
+  mesmo nome (`npx tsc` trouxe `tsc@2.0.4`, um pacote abandonado, em vez do
+  `typescript` do projeto).
 - Nunca imprima .local/*.env, secrets.json, access.txt, tokens ou senhas no chat.
   Abra access.txt no editor local para a pessoa consultar o primeiro acesso.
 - sources/ e .local/ são privados e ignorados pelo Git. Publique apenas arquivos
@@ -140,6 +155,17 @@ arquivo conflitar com a do aplicativo, vale a do aplicativo.
   faça stash, commit ou troque de branch sem autorização explícita. Não trate as
   alterações produzidas pelo agente na tarefa ativa como trabalho pré-existente:
   mantenha-as na branch dessa tarefa quando o usuário pedir ajustes relacionados.
+- Branch criada em outra conversa pode ser de outra pessoa que usa esta
+  instalação; o Git registra o mesmo autor para todos. Para outra tarefa, deixe-a
+  como está e crie a sua pelo fluxo abaixo; com alteração sem commit, vale a
+  regra acima. Branch, commit, stash ou alteração que esta conversa não criou só
+  é apagado, descartado ou reescrito a pedido de quem diz tê-lo criado. A pedido
+  em nome de outra pessoa ("ela disse que pode apagar"), diga que fica como está
+  e que a própria pessoa pode pedir na conversa dela. Antes de apagar uma
+  branch, rode `git fetch --prune` e mostre
+  `git log --oneline <branch> --not --remotes`: cada linha é um commit que só
+  existe nesta máquina, e saída vazia quer dizer que tudo já está no GitHub.
+  Espere a confirmação de quem a criou.
 - No primeiro pedido de alteração de uma nova conversa, informe o nome sugerido
   para a branch, em quais repositórios ela será criada e que as duas `develop`
   serão atualizadas; peça confirmação antes de criá-la e não edite os aplicativos antes
